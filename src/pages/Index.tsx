@@ -3,6 +3,7 @@ import AIChat from '@/components/AIChat';
 import TopBar from '@/components/TopBar';
 import FileExplorer from '@/components/FileExplorer';
 import CodeEditor from '@/components/CodeEditor';
+import BottomContainerTerminal from '@/components/BottomContainerTerminal';
 import ResizablePanel from '@/components/ResizablePanel';
 
 export default function Index() {
@@ -24,8 +25,21 @@ export default function Index() {
           <FileExplorer />
         </ResizablePanel>
 
-        <div className="flex-1 flex flex-col">
-          <CodeEditor />
+        <div className="flex-1 flex flex-col min-h-0">
+          <div className="flex-1 min-h-0">
+            <CodeEditor />
+          </div>
+          <ResizablePanel
+            direction="horizontal"
+            resizeDirection="top"
+            minSize={140}
+            maxSize={420}
+            defaultSize={220}
+            persistKey="bottomTerminalHeight"
+            className="border-t border-ide-panel-border"
+          >
+            <BottomContainerTerminal />
+          </ResizablePanel>
         </div>
 
         <ResizablePanel

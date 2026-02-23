@@ -25,8 +25,13 @@ export interface FileContentResponse {
 }
 
 class FileSystemService {
-  private baseUrl = ''; // Use relative paths for monolith
-  private osInfo: any = null;
+  private osInfo: {
+    platform: string;
+    version: string;
+    userAgent: string;
+    isMobile: boolean;
+    isTablet: boolean;
+  } | null = null;
   
   constructor() {
     this.detectOS();
@@ -71,37 +76,25 @@ class FileSystemService {
     return this.osInfo;
   }
 
-  async getDirectoryContents(path: string = '.'): Promise<DirectoryResponse> {
-    // Return mock directory structure for UI demonstration
-    return this.getFallbackDirectoryContents(path);
+  private async request<T>(payload: Record<string, unknown>): Promise<T> {
+    const response = await fetch('/api/files', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || 'File API request failed');
+    }
+    return response.json() as Promise<T>;
   }
 
-  private async getFallbackDirectoryContents(path: string): Promise<DirectoryResponse> {
-    const files: FileSystemItem[] = [
-      { name: 'src', type: 'folder', path: 'src', fullPath: '/src', size: 0, modified: new Date().toISOString(), hidden: false },
-      { name: 'components', type: 'folder', path: 'src/components', fullPath: '/src/components', size: 0, modified: new Date().toISOString(), hidden: false },
-      { name: 'App.tsx', type: 'file', path: 'src/App.tsx', fullPath: '/src/App.tsx', size: 1024, modified: new Date().toISOString(), hidden: false },
-      { name: 'main.tsx', type: 'file', path: 'src/main.tsx', fullPath: '/src/main.tsx', size: 512, modified: new Date().toISOString(), hidden: false },
-      { name: 'index.css', type: 'file', path: 'src/index.css', fullPath: '/src/index.css', size: 256, modified: new Date().toISOString(), hidden: false },
-    ];
-    
-    return {
-      path,
-      fullPath: path,
-      relativePath: path,
-      files
-    };
+  async getDirectoryContents(path: string = '.'): Promise<DirectoryResponse> {
+    return this.request<DirectoryResponse>({ action: 'list', path });
   }
 
   async getFileContent(path: string): Promise<FileContentResponse> {
-    return {
-      path,
-      fullPath: path,
-      relativePath: path,
-      content: "// This is mock content for " + path + "\nconsole.log('UI Only Mode');",
-      size: 100,
-      modified: new Date().toISOString()
-    };
+    return this.request<FileContentResponse>({ action: 'read', path });
   }
 
   // Convert FileSystemItem to the format expected by FileExplorer
@@ -109,35 +102,31 @@ class FileSystemService {
     return {
       id: item.path || item.name,
       name: item.name,
-      type: item.type === 'directory' ? 'folder' : 'file',
+      type: item.type === 'folder' ? 'folder' : 'file',
       path: item.path,
       fullPath: item.fullPath || item.path,
       size: item.size || 0,
       modified: item.modified || new Date().toISOString(),
       hidden: item.hidden || false,
-      expanded: item.type === 'directory' ? expanded.has(item.path || item.name) : undefined,
-      children: item.type === 'directory' ? [] : undefined
+      expanded: item.type === 'folder' ? expanded.has(item.path || item.name) : undefined,
+      children: item.type === 'folder' ? [] : undefined
     };
   }
 
   async createFileOrFolder(path: string, type: 'file' | 'folder'): Promise<any> {
-    console.log('Mock: Created ' + type + ' at ' + path);
-    return { success: true };
+    return this.request({ action: 'create', path, type });
   }
 
   async renameFileOrFolder(oldPath: string, newPath: string): Promise<any> {
-    console.log('Mock: Renamed ' + oldPath + ' to ' + newPath);
-    return { success: true };
+    return this.request({ action: 'rename', path: oldPath, newPath });
   }
 
   async deleteFileOrFolder(path: string): Promise<any> {
-    console.log('Mock: Deleted ' + path);
-    return { success: true };
+    return this.request({ action: 'delete', path });
   }
 
   async moveFileOrFolder(source: string, destination: string): Promise<any> {
-    console.log('Mock: Moved ' + source + ' to ' + destination);
-    return { success: true };
+    return this.request({ action: 'rename', path: source, newPath: destination });
   }
 
   // Browser File API methods for cross-platform support

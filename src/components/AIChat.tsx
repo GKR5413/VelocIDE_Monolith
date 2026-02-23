@@ -1,18 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import {
-  Send,
-  Bot,
-  User,
-  Copy,
-  RefreshCw,
-  Settings,
-  Sparkles,
-  Trash2,
-  Terminal
-} from 'lucide-react';
+import { Send, Bot, User, Copy, Sparkles, Trash2, Terminal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useAgentTerminal } from '@/hooks/useAgentTerminal';
 
 interface TerminalOutput {
   command: string;
@@ -30,11 +19,14 @@ interface ChatMessage {
   terminalOutputs?: TerminalOutput[];
 }
 
-// Updated model definitions (Feb 2026)
+interface AgentHistoryMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 const models = [
-  // Generic model placeholders
-  { value: 'gemini-2.0-flash', label: 'VelocIDE Model (Flash)', provider: 'gemini' },
-  { value: 'gemini-1.5-pro', label: 'VelocIDE Model (Pro)', provider: 'gemini' },
+  { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', provider: 'gemini' },
+  { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', provider: 'gemini' },
 ];
 
 export const AIChat: React.FC = () => {
@@ -42,160 +34,89 @@ export const AIChat: React.FC = () => {
   const [inputValue, setInputValue] = useState('');
   const [selectedModel, setSelectedModel] = useState(models[0].value);
   const [isLoading, setIsLoading] = useState(false);
-  const [commandsDetected, setCommandsDetected] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const sessionIdRef = useRef(`ai-chat-session-${Date.now()}`);
 
-  // Initialize agent terminal integration
-  const { processAgentResponse, isAutoSpawnEnabled } = useAgentTerminal({
-    agentId: `ai-chat-${selectedModel}`,
-    autoSpawn: true,
-    onCommandDetected: (commands) => {
-      console.log('🔔 Terminal commands detected:', commands);
-      setCommandsDetected(commands);
-    },
-  });
-
-  // Auto-scrolling effect
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Extract commands from backticks and execute them inline
-  const executeInlineCommands = useCallback(async (message: ChatMessage) => {
-    const commandRegex = /`([^`]+)`/g;
-    const commands: string[] = [];
-    let match;
-
-    while ((match = commandRegex.exec(message.content)) !== null) {
-      commands.push(match[1]);
+  const messageContentForAgent = useCallback((message: ChatMessage): string => {
+    let content = message.content;
+    if (message.terminalOutputs && message.terminalOutputs.length > 0) {
+      content += '\n\n[Terminal Execution Results]:';
+      message.terminalOutputs.forEach((term, idx) => {
+        content += `\n\nCommand #${idx + 1}: ${term.command}`;
+        content += `\nOutput:\n${term.output || ''}`;
+        if (term.exitCode !== undefined) {
+          content += `\nExit Code: ${term.exitCode}`;
+        }
+      });
     }
-
-    if (commands.length === 0) return;
-
-    // Execute each command and update the message with terminal outputs
-    const terminalOutputs: TerminalOutput[] = [];
-
-    for (const command of commands) {
-      const terminalOutput: TerminalOutput = {
-        command,
-        output: '',
-        isRunning: true,
-      };
-      terminalOutputs.push(terminalOutput);
-
-      // Update message to show running status
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === message.id ? { ...msg, terminalOutputs: [...terminalOutputs] } : msg
-        )
-      );
-
-      // Execute command via monolith server
-      try {
-        const response = await fetch('/api/files', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'execute',
-            command: command
-          }),
-        });
-
-        const result = await response.json();
-        terminalOutput.output = result.output || result.error || 'No output';
-        terminalOutput.exitCode = result.exitCode;
-        terminalOutput.isRunning = false;
-
-        // Update message with command output
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === message.id ? { ...msg, terminalOutputs: [...terminalOutputs] } : msg
-          )
-        );
-      } catch (error) {
-        terminalOutput.output = `Error: ${error}`;
-        terminalOutput.isRunning = false;
-        terminalOutput.exitCode = 1;
-
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === message.id ? { ...msg, terminalOutputs: [...terminalOutputs] } : msg
-          )
-        );
-      }
-    }
+    return content;
   }, []);
 
   const sendMessage = useCallback(async () => {
     if (!inputValue.trim() || isLoading) return;
 
-    const newMessage: ChatMessage = {
-      id: Date.now().toString(),
+    const currentModel = models.find((m) => m.value === selectedModel) || models[0];
+    const userMessage: ChatMessage = {
+      id: `${Date.now()}-user`,
       type: 'user',
       content: inputValue,
-      timestamp: new Date()
+      timestamp: new Date(),
     };
 
-    setMessages(prev => [...prev, newMessage]);
+    setMessages((prev) => [...prev, userMessage]);
     setInputValue('');
     setIsLoading(true);
 
     try {
-      console.log('🔍 Attempting to connect to agent service...');
+      const history: AgentHistoryMessage[] = messages.map((msg) => ({
+        role: msg.type === 'user' ? 'user' : 'assistant',
+        content: messageContentForAgent(msg),
+      }));
 
-      // Determine provider from selected model
-      const currentModel = models.find(m => m.value === selectedModel);
-      const provider = currentModel?.provider || 'groq';
-
-      // Build conversation history including terminal outputs for agentic behavior
-      const conversationHistory = messages.map(msg => {
-        let content = msg.content;
-
-        // Include terminal outputs in the message content for AI to see results
-        if (msg.terminalOutputs && msg.terminalOutputs.length > 0) {
-          content += '\n\n[Terminal Execution Results]:';
-          msg.terminalOutputs.forEach((term, idx) => {
-            content += `\n\nCommand #${idx + 1}: ${term.command}`;
-            if (term.output) {
-              content += `\nOutput:\n${term.output}`;
-            }
-            if (term.exitCode !== undefined) {
-              content += `\nExit Code: ${term.exitCode} ${term.exitCode === 0 ? '(Success)' : '(Failed)'}`;
-            }
-          });
-        }
-
-        return {
-          role: msg.type === 'user' ? 'user' : 'assistant',
-          content: content
-        };
+      const response = await fetch('/api/agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: currentModel.provider,
+          model: selectedModel,
+          sessionId: sessionIdRef.current,
+          messages: [...history, { role: 'user', content: inputValue }],
+        }),
       });
 
-      const requestBody = {
-        provider: provider,
-        model: selectedModel,
-        messages: [
-          ...conversationHistory,
-          { role: 'user', content: inputValue }
-        ]
-      };
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Agent service error: ${response.status} ${errorText}`);
+      }
 
-      // Build mock AI response for UI demonstration
-      const aiResponse: ChatMessage = {
-        id: (Date.now() + 1).toString(),
+      const data = await response.json();
+      const aiMessage: ChatMessage = {
+        id: `${Date.now()}-ai`,
         type: 'ai',
-        content: `I am currently running in UI-Only mode. In a full installation, I would process your request: "${inputValue}"`,
+        content: data?.content || 'No response generated.',
         timestamp: new Date(),
-        model: currentModel?.label,
+        model: currentModel.label,
+        terminalOutputs: Array.isArray(data?.terminalOutputs) ? data.terminalOutputs : [],
       };
 
-      setMessages((prev) => [...prev, aiResponse]);
+      setMessages((prev) => [...prev, aiMessage]);
     } catch (error) {
-      console.error("Chat Error:", error);
+      const errorMessage: ChatMessage = {
+        id: `${Date.now()}-err`,
+        type: 'ai',
+        content: `Request failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        timestamp: new Date(),
+        model: currentModel.label,
+      };
+      setMessages((prev) => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
     }
-  }, [inputValue, isLoading, selectedModel, messages]);
+  }, [inputValue, isLoading, messageContentForAgent, messages, selectedModel]);
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -210,6 +131,7 @@ export const AIChat: React.FC = () => {
 
   const clearConversation = () => {
     setMessages([]);
+    sessionIdRef.current = `ai-chat-session-${Date.now()}`;
   };
 
   return (
@@ -245,7 +167,6 @@ export const AIChat: React.FC = () => {
             <div className={`message-content rounded-lg px-3 py-2 max-w-lg ${message.type === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600'}`}>
               <p className="text-sm whitespace-pre-wrap break-words font-medium">{message.content}</p>
 
-              {/* Terminal outputs inline */}
               {message.terminalOutputs && message.terminalOutputs.length > 0 && (
                 <div className="mt-2 space-y-2">
                   {message.terminalOutputs.map((terminal, idx) => (
@@ -255,9 +176,7 @@ export const AIChat: React.FC = () => {
                         <span>$ {terminal.command}</span>
                         {terminal.isRunning && <span className="animate-pulse">Running...</span>}
                       </div>
-                      {terminal.output && (
-                        <pre className="whitespace-pre-wrap text-xs overflow-x-auto">{terminal.output}</pre>
-                      )}
+                      {terminal.output && <pre className="whitespace-pre-wrap text-xs overflow-x-auto">{terminal.output}</pre>}
                       {!terminal.isRunning && terminal.exitCode !== undefined && (
                         <div className={`text-xs mt-1 ${terminal.exitCode === 0 ? 'text-green-500' : 'text-red-500'}`}>
                           Exit code: {terminal.exitCode}
@@ -270,7 +189,7 @@ export const AIChat: React.FC = () => {
 
               <div className="message-actions text-xs mt-1 opacity-80 flex items-center gap-2">
                 <span>{message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                {message.model && <span className='font-semibold'>{message.model}</span>}
+                {message.model && <span className="font-semibold">{message.model}</span>}
                 {message.type === 'ai' && (
                   <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => copyMessage(message.content)} title="Copy">
                     <Copy className="w-3 h-3" />
@@ -308,4 +227,5 @@ export const AIChat: React.FC = () => {
     </div>
   );
 };
+
 export default AIChat;

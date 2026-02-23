@@ -157,7 +157,7 @@ const FileTreeNode: React.FC<FileTreeNodeProps> = ({ node, level, onSelect, onTo
 
 const FileExplorer: React.FC = () => {
   const { files, openFile, refreshFileTree, loadNodeChildren } = useIDE();
-  const [expanded, setExpanded] = useState<Set<string>>(new Set(['src']));
+  const [expanded, setExpanded] = useState<Set<string>>(new Set(['@workspace']));
   const [selectedId, setSelectedId] = useState<string | undefined>();
 
   const toggleFolder = useCallback(async (node: IDEFileNode) => {
@@ -169,6 +169,14 @@ const FileExplorer: React.FC = () => {
   }, [expanded, loadNodeChildren]);
 
   useEffect(() => { refreshFileTree(); }, [refreshFileTree]);
+
+  useEffect(() => {
+    files.forEach((node) => {
+      if (node.type === 'folder' && expanded.has(node.id) && (!node.children || node.children.length === 0)) {
+        void loadNodeChildren(node);
+      }
+    });
+  }, [files, expanded, loadNodeChildren]);
 
   return (
     <div className="flex flex-col h-full bg-[#252526] text-gray-300">

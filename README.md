@@ -25,6 +25,28 @@ VelocIDE - A modern, web-based integrated development environment with container
 
 ## 🚀 Quick Start
 
+### Frontend Monolith In Docker (Recommended)
+Run the Web IDE monolith (frontend + `/api/files` + `/api/agent`) as a single container on localhost:
+
+```bash
+npm install
+npm run docker:build
+npm run docker:up
+```
+
+Open: `http://localhost:8080`
+
+Useful commands:
+
+```bash
+npm run docker:logs
+npm run docker:down
+```
+
+Environment variables:
+- `GEMINI_API_KEY`: required for live Gemini responses from `/api/agent`
+- `WORKSPACE_ROOT`: server-side sandbox root for file and command operations (default `/app/workspace` in Docker)
+
 ### Prerequisites
 - **Node.js 18+** and npm
 - **Docker** and Docker Compose
@@ -259,4 +281,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Docker** - Containerization and isolation platform
 - **React Team** - Amazing JavaScript framework
 - **Vite Team** - Next-generation build tooling
-

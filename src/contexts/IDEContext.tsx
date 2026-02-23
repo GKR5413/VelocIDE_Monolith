@@ -84,19 +84,30 @@ export const IDEProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (nextActiveId) localStorage.setItem('ide-active-tab', nextActiveId);
   }, []);
 
-  // Helper: strip leading slash for workspace API calls
-  const toWorkspacePath = (p: string) => p.startsWith('/') ? p.slice(1) : p;
+  const updateNodeChildren = useCallback((nodes: IDEFileNode[], nodeId: string, children: IDEFileNode[]): IDEFileNode[] => {
+    return nodes.map((node) => {
+      if (node.id === nodeId) {
+        return { ...node, children };
+      }
+      if (node.children && node.children.length > 0) {
+        return { ...node, children: updateNodeChildren(node.children, nodeId, children) };
+      }
+      return node;
+    });
+  }, []);
 
   const loadNodeChildren = useCallback(async (node: IDEFileNode): Promise<IDEFileNode[]> => {
     if (node.type !== 'folder') return [];
     try {
       const response = await fileSystemService.getDirectoryContents(node.path);
-      return response.files.map(item => fileSystemService.convertToFileNode(item, new Set()));
+      const children = response.files.map(item => fileSystemService.convertToFileNode(item, new Set()));
+      setFiles((prev) => updateNodeChildren(prev, node.id, children));
+      return children;
     } catch (error) {
       console.error(`Failed to load children for ${node.path}:`, error);
       return [];
     }
-  }, []);
+  }, [updateNodeChildren]);
 
   const refreshFileTree = useCallback(async () => {
     console.log('refreshFileTree called');
@@ -452,4 +463,3 @@ export const useIDE = (): IDEState => {
     if (filePath.endsWith('.json')) return 'json';
     return 'text';
   };
-
