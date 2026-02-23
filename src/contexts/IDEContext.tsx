@@ -45,6 +45,7 @@ interface IDEState {
   triggerEditorAction: (action: string) => void;
   refreshFileTree: () => Promise<void>;
   loadNodeChildren: (node: IDEFileNode) => Promise<IDEFileNode[]>;
+  importRepository: (repoUrl: string, targetPath?: string) => Promise<{ action: string; path: string }>;
 }
 
 type EditorRefValue = {
@@ -355,6 +356,20 @@ export const IDEProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     persist(nextTabs, id);
   };
 
+  const importRepository = useCallback(async (repoUrl: string, targetPath?: string) => {
+    const response = await fetch('/api/git/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repoUrl, targetPath }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(String(data?.error || 'Failed to import repository'));
+    }
+    await refreshFileTree();
+    return { action: String(data?.action || 'imported'), path: String(data?.path || '') };
+  }, [refreshFileTree]);
+
   const value: IDEState = {
     files,
     tabs,
@@ -423,6 +438,7 @@ export const IDEProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     triggerEditorAction,
     refreshFileTree,
     loadNodeChildren,
+    importRepository,
   };
 
   return <IDEContext.Provider value={value}>{children}</IDEContext.Provider>;

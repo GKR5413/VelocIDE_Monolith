@@ -19,6 +19,7 @@ import { useNavigate } from 'react-router-dom';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useIDE } from '@/contexts/IDEContext';
+import { toast } from '@/hooks/use-toast';
 
 export const TopBar: React.FC = () => {
   const { theme, toggleTheme } = useTheme();
@@ -30,8 +31,28 @@ export const TopBar: React.FC = () => {
     pickAndOpenFile, 
     saveActiveToDisk, 
     createFile,
-    triggerEditorAction
+    triggerEditorAction,
+    importRepository,
   } = useIDE();
+
+  const handleImportRepo = async () => {
+    const repoUrl = window.prompt('Repository URL (https://... or git@...)');
+    if (!repoUrl?.trim()) return;
+    const targetPath = window.prompt('Target path under workspace (optional)', '') || undefined;
+    try {
+      const result = await importRepository(repoUrl.trim(), targetPath?.trim() || undefined);
+      toast({
+        title: 'Repository imported',
+        description: `${result.action}: ${result.path}`,
+      });
+    } catch (error) {
+      toast({
+        title: 'Import failed',
+        description: error instanceof Error ? error.message : 'Unknown error',
+        variant: 'destructive',
+      });
+    }
+  };
 
   return (
     <header className="h-12 ide-panel border-b border-ide-panel-border flex items-center sticky top-0 z-50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -55,6 +76,7 @@ export const TopBar: React.FC = () => {
               <DropdownMenuItem onClick={() => createFile()}>New File</DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={pickAndOpenFile}>Open File…</DropdownMenuItem>
+              <DropdownMenuItem onClick={handleImportRepo}>Import Repository…</DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={saveActiveToDisk} disabled={!activeTab}>Save</DropdownMenuItem>
               <DropdownMenuItem onClick={saveAll}>Save All</DropdownMenuItem>

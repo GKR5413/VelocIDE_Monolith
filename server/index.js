@@ -190,6 +190,87 @@ const deleteNode = async (inputPath) => {
   return { success: true, path: relativePath };
 };
 
+const runProcess = async (cmd, args, options = {}) =>
+  await new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, {
+      cwd: options.cwd || WORKSPACE_ROOT,
+      env: {
+        PATH: process.env.PATH || '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+        HOME: CONTAINER_HOME,
+        ...options.env,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on('error', reject);
+    child.on('close', (exitCode) => {
+      if ((exitCode ?? 1) !== 0) {
+        reject(new Error(`${cmd} ${args.join(' ')} failed (${exitCode}): ${stderr || stdout}`));
+        return;
+      }
+      resolve({ stdout, stderr, exitCode: exitCode ?? 0 });
+    });
+  });
+
+const sanitizeRepoUrl = (repoUrl) => {
+  const value = String(repoUrl || '').trim();
+  if (!value) throw new Error('Repository URL is required');
+  const ok =
+    /^https?:\/\/[\w.-]+\/[\w./-]+(?:\.git)?$/i.test(value) ||
+    /^git@[\w.-]+:[\w./-]+(?:\.git)?$/i.test(value) ||
+    /^ssh:\/\/[\w.@:-]+\/[\w./-]+(?:\.git)?$/i.test(value);
+  if (!ok) throw new Error('Unsupported repository URL');
+  return value;
+};
+
+const deriveRepoFolder = (repoUrl) => {
+  const normalized = repoUrl.replace(/\/+$/, '');
+  const base = normalized.split('/').pop()?.replace(/\.git$/i, '') || 'repo';
+  return base.replace(/[^a-zA-Z0-9._-]/g, '-');
+};
+
+const importGitRepository = async ({ repoUrl, targetPath }) => {
+  const safeRepoUrl = sanitizeRepoUrl(repoUrl);
+  const repoFolder = deriveRepoFolder(safeRepoUrl);
+  const requestedPath = String(targetPath || '').trim();
+  const virtualTarget = requestedPath
+    ? (requestedPath.startsWith('@') ? requestedPath : `${VIRTUAL_WORKSPACE}/${requestedPath.replace(/^\/+/, '')}`)
+    : `${VIRTUAL_WORKSPACE}/${repoFolder}`;
+
+  const { resolved: targetResolved, relativePath: targetVirtual } = resolveSandboxPath(virtualTarget);
+  await fs.mkdir(path.dirname(targetResolved), { recursive: true });
+
+  const gitDir = path.join(targetResolved, '.git');
+  const existingGitRepo = await fs
+    .stat(gitDir)
+    .then((stat) => stat.isDirectory())
+    .catch(() => false);
+
+  if (existingGitRepo) {
+    await runProcess('git', ['-C', targetResolved, 'pull', '--ff-only'], { cwd: targetResolved });
+    return { success: true, action: 'pulled', path: targetVirtual, repoUrl: safeRepoUrl };
+  }
+
+  const targetExists = await fs
+    .stat(targetResolved)
+    .then(() => true)
+    .catch(() => false);
+  if (targetExists) {
+    throw new Error(`Target already exists and is not a git repository: ${targetVirtual}`);
+  }
+
+  await runProcess('git', ['clone', safeRepoUrl, targetResolved], { cwd: WORKSPACE_ROOT });
+  return { success: true, action: 'cloned', path: targetVirtual, repoUrl: safeRepoUrl };
+};
+
 const validateCommand = (command) => {
   const value = String(command || '').trim();
   if (!value) throw new Error('Command is required');
@@ -909,6 +990,18 @@ app.post('/api/agent', async (req, res) => {
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : 'Agent request failed' });
+  }
+});
+
+app.post('/api/git/import', async (req, res) => {
+  try {
+    const result = await importGitRepository({
+      repoUrl: req.body?.repoUrl,
+      targetPath: req.body?.targetPath,
+    });
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to import repository' });
   }
 });
 
