@@ -180,57 +180,22 @@ export const AIChat: React.FC = () => {
         ]
       };
 
-      let data: any = null;
-      try {
-        const response = await fetch('/api/agent', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(requestBody),
-        });
-
-        console.log('✅ Agent response:', response.status, response.statusText);
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        data = await response.json();
-      } catch (error) {
-        console.error("Failed to connect to agent:", error);
-        throw error;
-      }
-
-      console.log('📦 Response data:', data);
-
+      // Build mock AI response for UI demonstration
       const aiResponse: ChatMessage = {
         id: (Date.now() + 1).toString(),
         type: 'ai',
-        content: data.response,
+        content: `I am currently running in UI-Only mode. In a full installation, I would process your request: "${inputValue}"`,
         timestamp: new Date(),
         model: currentModel?.label,
       };
 
       setMessages((prev) => [...prev, aiResponse]);
-
-      // Extract and execute commands inline
-      await executeInlineCommands(aiResponse);
-
     } catch (error) {
-      console.error("Failed to send message to agent:", error);
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      const errorResponse: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        type: 'ai',
-        content: `Sorry, I encountered an error trying to connect to the agent service.\n\n${errorMessage}`,
-        timestamp: new Date(),
-        model: 'Error'
-      };
-      setMessages((prev) => [...prev, errorResponse]);
+      console.error("Chat Error:", error);
     } finally {
       setIsLoading(false);
     }
-  }, [inputValue, isLoading, selectedModel, messages, processAgentResponse]);
+  }, [inputValue, isLoading, selectedModel, messages]);
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {

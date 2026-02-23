@@ -72,36 +72,17 @@ class FileSystemService {
   }
 
   async getDirectoryContents(path: string = '.'): Promise<DirectoryResponse> {
-    try {
-      const response = await fetch(`${this.baseUrl}/api/files`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'list', path })
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch directory: ${response.statusText}`);
-      }
-      
-      return await response.json();
-    } catch (error) {
-      console.error('Error fetching directory contents:', error);
-      return this.getFallbackDirectoryContents(path);
-    }
+    // Return mock directory structure for UI demonstration
+    return this.getFallbackDirectoryContents(path);
   }
 
   private async getFallbackDirectoryContents(path: string): Promise<DirectoryResponse> {
-    // Return container-specific workspace directories instead of host paths
     const files: FileSystemItem[] = [
-      { 
-        name: 'workspace', 
-        type: 'folder', 
-        path: 'workspace', 
-        fullPath: '/workspace', 
-        size: 0, 
-        modified: new Date().toISOString(), 
-        hidden: false 
-      }
+      { name: 'src', type: 'folder', path: 'src', fullPath: '/src', size: 0, modified: new Date().toISOString(), hidden: false },
+      { name: 'components', type: 'folder', path: 'src/components', fullPath: '/src/components', size: 0, modified: new Date().toISOString(), hidden: false },
+      { name: 'App.tsx', type: 'file', path: 'src/App.tsx', fullPath: '/src/App.tsx', size: 1024, modified: new Date().toISOString(), hidden: false },
+      { name: 'main.tsx', type: 'file', path: 'src/main.tsx', fullPath: '/src/main.tsx', size: 512, modified: new Date().toISOString(), hidden: false },
+      { name: 'index.css', type: 'file', path: 'src/index.css', fullPath: '/src/index.css', size: 256, modified: new Date().toISOString(), hidden: false },
     ];
     
     return {
@@ -113,22 +94,14 @@ class FileSystemService {
   }
 
   async getFileContent(path: string): Promise<FileContentResponse> {
-    try {
-      const response = await fetch(`${this.baseUrl}/api/files`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'read', path })
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch file: ${response.statusText}`);
-      }
-      
-      return await response.json();
-    } catch (error) {
-      console.error('Error fetching file content:', error);
-      throw error;
-    }
+    return {
+      path,
+      fullPath: path,
+      relativePath: path,
+      content: "// This is mock content for " + path + "\nconsole.log('UI Only Mode');",
+      size: 100,
+      modified: new Date().toISOString()
+    };
   }
 
   // Convert FileSystemItem to the format expected by FileExplorer
@@ -148,55 +121,23 @@ class FileSystemService {
   }
 
   async createFileOrFolder(path: string, type: 'file' | 'folder'): Promise<any> {
-    const response = await fetch(`${this.baseUrl}/api/files`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'write', path, content: type === 'folder' ? '' : '', type }),
-    });
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message);
-    }
-    return response.json();
+    console.log('Mock: Created ' + type + ' at ' + path);
+    return { success: true };
   }
 
   async renameFileOrFolder(oldPath: string, newPath: string): Promise<any> {
-    const response = await fetch(`${this.baseUrl}/api/files`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'rename', oldPath, newPath }),
-    });
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message);
-    }
-    return response.json();
+    console.log('Mock: Renamed ' + oldPath + ' to ' + newPath);
+    return { success: true };
   }
 
   async deleteFileOrFolder(path: string): Promise<any> {
-    const response = await fetch(`${this.baseUrl}/api/files`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'delete', path }),
-    });
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message);
-    }
-    return response.json();
+    console.log('Mock: Deleted ' + path);
+    return { success: true };
   }
 
   async moveFileOrFolder(source: string, destination: string): Promise<any> {
-    const response = await fetch(`${this.baseUrl}/api/files`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'move', source, destination }),
-    });
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message);
-    }
-    return response.json();
+    console.log('Mock: Moved ' + source + ' to ' + destination);
+    return { success: true };
   }
 
   // Browser File API methods for cross-platform support

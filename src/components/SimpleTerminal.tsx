@@ -43,59 +43,23 @@ export const SimpleTerminal: React.FC<SimpleTerminalProps> = ({ className }) => 
     // Connect to Docker terminal
     connectToDockerTerminal();
 
-    // Handle terminal input
-    let currentInput = '';
-    terminal.onData(async (data) => {
-      if (isConnected && sessionId) {
-        if (data === '\r' || data === '\n') {
-          if (currentInput.trim()) {
-            terminal.write('\r\n');
-            
-            try {
-              const response = await fetch('/terminal/execute', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  session_id: sessionId,
-                  command: currentInput.trim()
-                })
-              });
-
-              const result = await response.json();
-              
-              if (result.success) {
-                if (result.output) terminal.write(result.output);
-                if (result.error) terminal.write(`\x1b[31m${result.error}\x1b[0m\r\n`);
-              } else {
-                terminal.write(`\x1b[31mCommand failed: ${result.error}\x1b[0m\r\n`);
-              }
-            } catch (error) {
-              terminal.write(`\x1b[31mError: ${error}\x1b[0m\r\n`);
-            }
-            
-            currentInput = '';
-            terminal.write('\r\n$ ');
-          } else {
-            terminal.write('\r\n$ ');
-          }
-        } else if (data === '\u007F') {
-          if (currentInput.length > 0) {
-            currentInput = currentInput.slice(0, -1);
-            terminal.write('\b \b');
-          }
-        } else if (data >= ' ') {
-          currentInput += data;
-          terminal.write(data);
-        } else if (data === '\u0003') {
-          currentInput = '';
-          terminal.write('^C\r\n$ ');
-        }
+    // Handle terminal input (Local Echo Only)
+    terminal.onData((data) => {
+      if (data === '\r') {
+        terminal.write('\r\n$ ');
+      } else {
+        terminal.write(data);
       }
     });
 
     // Handle resize
     const handleResize = () => fitAddon.fit();
     window.addEventListener('resize', handleResize);
+
+    // Initial message
+    terminal.write('\x1b[32m✅ VelocIDE UI-Only Mode\x1b[0m\r\n');
+    terminal.write('\x1b[33mTerminal commands are disabled in this demo.\x1b[0m\r\n');
+    terminal.write('\r\n$ ');
 
     return () => {
       terminal.dispose();
@@ -104,36 +68,7 @@ export const SimpleTerminal: React.FC<SimpleTerminalProps> = ({ className }) => 
   }, []);
 
   const connectToDockerTerminal = async () => {
-    try {
-      const sessionId = `terminal_${Date.now()}`;
-      
-      const response = await fetch('/terminal/session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          session_id: sessionId,
-          shell: 'bash',
-          working_directory: '/workspace',
-          environment: {},
-          cols: 100,
-          rows: 30
-        })
-      });
-
-      const result = await response.json();
-      
-      if (result.success) {
-        setSessionId(sessionId);
-        setIsConnected(true);
-        xtermRef.current?.write('\x1b[32m✅ Connected to Docker Terminal\x1b[0m\r\n');
-        xtermRef.current?.write('\x1b[33mType commands and press Enter\x1b[0m\r\n');
-        xtermRef.current?.write('\r\n$ ');
-      } else {
-        xtermRef.current?.write(`\x1b[31m❌ Connection failed: ${result.error}\x1b[0m\r\n`);
-      }
-    } catch (error) {
-      xtermRef.current?.write(`\x1b[31m❌ Connection error: ${error}\x1b[0m\r\n`);
-    }
+    // Disabled in UI mode
   };
 
   return (
