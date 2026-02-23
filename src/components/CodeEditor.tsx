@@ -2,13 +2,14 @@ import React from 'react';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useIDE } from '@/contexts/IDEContext';
 import Editor, { Monaco } from '@monaco-editor/react';
+import type { editor as MonacoEditor } from 'monaco-editor';
 import { X } from 'lucide-react';
 
 export const CodeEditor: React.FC = () => {
   const { theme } = useTheme();
   const { activeTab, tabs, setActiveTab, closeTab, updateActiveContent, editorRef } = useIDE();
 
-  const handleEditorDidMount = (editor: any, monaco: Monaco) => {
+  const handleEditorDidMount = (editor: MonacoEditor.IStandaloneCodeEditor, _monaco: Monaco) => {
     editorRef.current = editor;
   };
 

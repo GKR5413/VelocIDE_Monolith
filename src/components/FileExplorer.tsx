@@ -46,6 +46,18 @@ interface ContextMenuProps {
   onAction: (action: string, node: IDEFileNode) => void;
 }
 
+type MenuItem =
+  | { separator: true }
+  | { icon: React.ComponentType<{ className?: string }>; label: string; action: string };
+
+const MENU_ITEMS: MenuItem[] = [
+  { icon: FilePlus, label: 'New File', action: 'newFile' },
+  { icon: FolderPlus, label: 'New Folder', action: 'newFolder' },
+  { separator: true },
+  { icon: Pencil, label: 'Rename', action: 'rename' },
+  { icon: Trash, label: 'Delete', action: 'delete' },
+];
+
 const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, onClose, onAction }) => {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -59,23 +71,50 @@ const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, onClose, onAction
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [onClose]);
 
-  const menuItems = [
-    { icon: FilePlus, label: 'New File', action: 'newFile' },
-    { icon: FolderPlus, label: 'New Folder', action: 'newFolder' },
-    { separator: true },
-    { icon: Pencil, label: 'Rename', action: 'rename' },
-    { icon: Trash, label: 'Delete', action: 'delete' },
-  ];
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
 
   return (
-    <div ref={menuRef} className="fixed bg-white dark:bg-[#252526] border dark:border-[#454545] shadow-lg rounded py-1 z-50 min-w-[160px]" style={{ left: x, top: y }}>
-      {menuItems.map((item, index) => (
-        item.separator ? <div key={index} className="h-px bg-gray-200 dark:bg-[#454545] my-1" /> :
-        <div key={index} className="flex items-center gap-2 px-3 py-1.5 hover:bg-blue-500 hover:text-white cursor-pointer text-sm" onClick={() => { onAction(item.action!, node); onClose(); }}>
-          {item.icon && <item.icon className="w-4 h-4" />}
-          <span>{item.label}</span>
-        </div>
-      ))}
+    <div
+      ref={menuRef}
+      role="menu"
+      aria-label="File context menu"
+      className="fixed bg-white dark:bg-[#252526] border dark:border-[#454545] shadow-lg rounded py-1 z-50 min-w-[160px]"
+      style={{ left: x, top: y }}
+    >
+      {MENU_ITEMS.map((item, index) => {
+        if ('separator' in item) {
+          return <div key={`sep-${index}`} className="h-px bg-gray-200 dark:bg-[#454545] my-1" aria-hidden />;
+        }
+        const { action, icon: Icon, label } = item;
+        return (
+          <div
+            key={action}
+            role="menuitem"
+            tabIndex={0}
+            className="flex items-center gap-2 px-3 py-1.5 hover:bg-blue-500 hover:text-white cursor-pointer text-sm"
+            onClick={() => {
+              onAction(action, node);
+              onClose();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onAction(action, node);
+                onClose();
+              }
+            }}
+          >
+            {Icon && <Icon className="w-4 h-4" />}
+            <span>{label}</span>
+          </div>
+        );
+      })}
     </div>
   );
 };

@@ -4,8 +4,6 @@ import TopBar from '@/components/TopBar';
 import FileExplorer from '@/components/FileExplorer';
 import CodeEditor from '@/components/CodeEditor';
 import ResizablePanel from '@/components/ResizablePanel';
-import { ContainerTerminal } from '@/components/ContainerTerminal';
-import { TerminalManager } from '@/components/terminal/TerminalManager';
 
 export default function Index() {
 
@@ -27,19 +25,7 @@ export default function Index() {
         </ResizablePanel>
 
         <div className="flex-1 flex flex-col">
-          <div className="flex-1">
-            <CodeEditor />
-          </div>
-          <ResizablePanel
-            direction="horizontal"
-            minSize={150}
-            maxSize={400}
-            defaultSize={200}
-            persistKey="terminalHeight"
-            className="border-t border-ide-panel-border"
-          >
-            <ContainerTerminal />
-          </ResizablePanel>
+          <CodeEditor />
         </div>
 
         <ResizablePanel
@@ -53,9 +39,6 @@ export default function Index() {
           <AIChat />
         </ResizablePanel>
       </div>
-
-      {/* Agentic Terminal System - Auto-spawns when agents need terminal access */}
-      <TerminalManager />
     </div>
   );
 }

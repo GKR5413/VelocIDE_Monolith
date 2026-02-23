@@ -62,6 +62,209 @@
   opacity: 1;
 }
 
+/* Frontend-only workspace styling */
+.fo-shell {
+  min-height: 100vh;
+  background:
+    radial-gradient(1200px 500px at -10% -10%, rgba(38, 132, 255, 0.16), transparent 60%),
+    radial-gradient(1000px 400px at 110% 0%, rgba(47, 198, 124, 0.14), transparent 55%),
+    linear-gradient(180deg, #f7fbff 0%, #eef4fb 100%);
+  color: #122033;
+}
+
+.fo-topbar {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 18px;
+  border-bottom: 1px solid rgba(22, 32, 51, 0.12);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(8px);
+}
+
+.fo-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.fo-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1d5fbe;
+  background: rgba(38, 132, 255, 0.12);
+  border: 1px solid rgba(38, 132, 255, 0.2);
+  border-radius: 999px;
+  padding: 6px 10px;
+}
+
+.fo-layout {
+  height: calc(100vh - 56px);
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 12px;
+  padding: 12px;
+}
+
+.fo-sidebar,
+.fo-editor-wrap {
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(22, 32, 51, 0.12);
+  box-shadow: 0 12px 32px rgba(12, 24, 45, 0.08);
+}
+
+.fo-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+}
+
+.fo-section-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #58708f;
+}
+
+.fo-row {
+  display: flex;
+  gap: 8px;
+}
+
+.fo-input {
+  flex: 1;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid rgba(22, 32, 51, 0.18);
+  padding: 0 10px;
+  font-size: 14px;
+  background: #fff;
+}
+
+.fo-input:focus {
+  outline: 2px solid rgba(38, 132, 255, 0.35);
+  border-color: rgba(38, 132, 255, 0.5);
+}
+
+.fo-btn {
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(22, 32, 51, 0.18);
+  background: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.fo-btn-primary {
+  background: linear-gradient(180deg, #2f83ff 0%, #1e66d8 100%);
+  color: #fff;
+  border-color: rgba(20, 86, 184, 0.8);
+}
+
+.fo-btn-danger {
+  color: #b32131;
+  border-color: rgba(179, 33, 49, 0.35);
+  background: rgba(179, 33, 49, 0.06);
+}
+
+.fo-file-list {
+  flex: 1;
+  min-height: 180px;
+  overflow: auto;
+  border-radius: 12px;
+  border: 1px solid rgba(22, 32, 51, 0.12);
+  background: rgba(249, 252, 255, 0.9);
+}
+
+.fo-file-item {
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid rgba(22, 32, 51, 0.08);
+  background: transparent;
+  color: #1c2f4a;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.fo-file-item:last-child {
+  border-bottom: 0;
+}
+
+.fo-file-item:hover {
+  background: rgba(38, 132, 255, 0.08);
+}
+
+.fo-file-item-active {
+  background: linear-gradient(90deg, rgba(38, 132, 255, 0.18), rgba(38, 132, 255, 0.08));
+  color: #114ca3;
+  font-weight: 700;
+}
+
+.fo-editor-wrap {
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  gap: 10px;
+}
+
+.fo-editor-header {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  border-radius: 10px;
+  background: rgba(244, 249, 255, 0.9);
+  border: 1px solid rgba(22, 32, 51, 0.12);
+}
+
+.fo-editor-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #143055;
+}
+
+.fo-editor-time {
+  font-size: 12px;
+  color: #58708f;
+}
+
+.fo-editor {
+  flex: 1;
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(22, 32, 51, 0.16);
+  padding: 14px;
+  resize: none;
+  background: #fff;
+  color: #122033;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.fo-editor:focus {
+  outline: 2px solid rgba(38, 132, 255, 0.35);
+  border-color: rgba(38, 132, 255, 0.5);
+}
+
+@media (max-width: 900px) {
+  .fo-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: 280px 1fr;
+  }
+}
+
 @layer base {
   :root {
     /* Professional Light Mode Colors */

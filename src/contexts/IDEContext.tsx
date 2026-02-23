@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useMemo, useState, useRef, useEffect } from 'react';
-import { terminalWorkspaceService } from '@/services/terminalWorkspaceService';
+import { fileSystemService } from '@/services/fileSystemService';
 import path from 'path-browserify';
 
 // 1. INTERFACES
@@ -28,7 +28,7 @@ interface IDEState {
   tabs: IDETab[];
   activeTabId?: string;
   activeTab?: IDETab;
-  editorRef: React.MutableRefObject<any | null>;
+  editorRef: React.MutableRefObject<EditorRefValue | null>;
   openFile: (file: IDEFileNode) => Promise<void>;
   setActiveTab: (tabId: string) => void;
   updateActiveContent: (next: string) => void;
@@ -47,17 +47,29 @@ interface IDEState {
   loadNodeChildren: (node: IDEFileNode) => Promise<IDEFileNode[]>;
 }
 
+type EditorRefValue = {
+  trigger: (source: string, action: string, payload: unknown) => void;
+};
+
+type WindowWithFileHandles = Window & {
+  __fileHandles?: Record<string, FileSystemFileHandle>;
+};
+
 // 2. CONTEXT (Not Exported)
 const IDEContext = createContext<IDEState | undefined>(undefined);
 
 // 3. PROVIDER COMPONENT (Exported)
 export const IDEProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [files, setFiles] = useState<IDEFileNode[]>([]);
-  const editorRef = useRef<any | null>(null);
+  const editorRef = useRef<EditorRefValue | null>(null);
   const [tabs, setTabs] = useState<IDETab[]>(() => {
     const saved = localStorage.getItem('ide-tabs');
     if (saved) {
-      try { return JSON.parse(saved) as IDETab[]; } catch {}
+      try {
+        return JSON.parse(saved) as IDETab[];
+      } catch {
+        // Ignore malformed persisted state.
+      }
     }
     return [];
   });
@@ -366,28 +378,30 @@ export const IDEProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setActiveTabId(newTab.id);
         persist(nextTabs, newTab.id);
         // attach handle map
-        (window as any).__fileHandles = { ...(window as any).__fileHandles, [newTab.id]: handle };
+        const browserWindow = window as WindowWithFileHandles;
+        browserWindow.__fileHandles = { ...browserWindow.__fileHandles, [newTab.id]: handle };
       } catch (e) {
-        // user cancelled
+        console.debug('File open was cancelled or blocked', e);
       }
     },
     saveActiveToDisk: async () => {
       if (!activeTab) return;
       try {
-        const handleMap = (window as any).__fileHandles || {};
+        const browserWindow = window as WindowWithFileHandles;
+        const handleMap = browserWindow.__fileHandles || {};
         let handle = handleMap[activeTab.id];
         if (!handle) {
           // @ts-expect-error File System Access API
           handle = await window.showSaveFilePicker?.({ suggestedName: activeTab.name });
           if (!handle) return;
-          (window as any).__fileHandles = { ...handleMap, [activeTab.id]: handle };
+          browserWindow.__fileHandles = { ...handleMap, [activeTab.id]: handle };
         }
         const writable = await handle.createWritable();
         await writable.write(activeTab.content);
         await writable.close();
         saveTab(activeTab.id);
       } catch (e) {
-        // ignore
+        console.debug('File save was cancelled or blocked', e);
       }
     },
     createFile,
@@ -438,5 +452,4 @@ export const useIDE = (): IDEState => {
     if (filePath.endsWith('.json')) return 'json';
     return 'text';
   };
-
 

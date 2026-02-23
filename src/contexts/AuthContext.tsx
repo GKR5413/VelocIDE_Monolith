@@ -65,7 +65,7 @@ const authReducer = (state: AuthState, action: AuthAction): AuthState => {
         isLoading: true,
         error: null,
       };
-    case 'AUTH_SUCCESS':
+    case 'AUTH_SUCCESS': {
       console.log('🎉 AUTH_SUCCESS reducer called with:', {
         user: action.payload.user?.username,
         hasToken: !!action.payload.token,
@@ -86,6 +86,7 @@ const authReducer = (state: AuthState, action: AuthAction): AuthState => {
         hasToken: !!newState.token
       });
       return newState;
+    }
     case 'AUTH_FAILURE':
       return {
         ...state,
@@ -139,6 +140,13 @@ const DEV_USER: User = {
 const AUTH_API_URL = 'http://localhost:3010';
 const TOKEN_STORAGE_KEY = 'velocide_auth_token';
 const USER_STORAGE_KEY = 'velocide_user';
+const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+const LAST_ACTIVITY_KEY = 'velocide_last_activity';
+
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) return error.message;
+  return 'Request failed';
+};
 
 // Auth provider component
 interface AuthProviderProps {
@@ -150,14 +158,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const initializingRef = React.useRef(false);
   const idleIntervalRef = React.useRef<number | null>(null);
 
-  // Idle timeout configuration (5 minutes)
-  const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
-  const LAST_ACTIVITY_KEY = 'velocide_last_activity';
-
   const markActivity = React.useCallback(() => {
     try {
       localStorage.setItem(LAST_ACTIVITY_KEY, Date.now().toString());
-    } catch {}
+    } catch {
+      // Ignore storage failures (private mode / storage disabled).
+    }
   }, []);
 
   // Initialize auth state and handle OAuth callback
@@ -234,7 +240,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     };
 
     initialize();
-  }, []); // Remove markActivity dependency to prevent infinite loops - GitHub OAuth fix
+  }, [markActivity]);
 
   // Idle timeout management: sign out after 5 minutes of inactivity
   useEffect(() => {
@@ -258,7 +264,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           localStorage.removeItem(USER_STORAGE_KEY);
           dispatch({ type: 'AUTH_LOGOUT' });
         }
-      } catch {}
+      } catch {
+        // Ignore invalid localStorage values.
+      }
     }, 30 * 1000); // check every 30s
 
     // Initialize last activity on mount
@@ -306,8 +314,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return;
       }
       throw new Error('Invalid response from server');
-    } catch (error: any) {
-      dispatch({ type: 'AUTH_FAILURE', payload: error.message });
+    } catch (error: unknown) {
+      dispatch({ type: 'AUTH_FAILURE', payload: getErrorMessage(error) });
       throw error;
     }
   };
@@ -326,8 +334,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return resp;
       }
       throw new Error('Unexpected response from server');
-    } catch (error: any) {
-      dispatch({ type: 'AUTH_FAILURE', payload: error.message });
+    } catch (error: unknown) {
+      dispatch({ type: 'AUTH_FAILURE', payload: getErrorMessage(error) });
       throw error;
     }
   };
@@ -346,8 +354,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return;
       }
       throw new Error('Invalid verification response');
-    } catch (error: any) {
-      dispatch({ type: 'AUTH_FAILURE', payload: error.message });
+    } catch (error: unknown) {
+      dispatch({ type: 'AUTH_FAILURE', payload: getErrorMessage(error) });
       throw error;
     }
   };
@@ -388,8 +396,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       dispatch({ type: 'AUTH_CLEAR_ERROR' });
       return response;
-    } catch (error: any) {
-      dispatch({ type: 'AUTH_FAILURE', payload: error.message });
+    } catch (error: unknown) {
+      dispatch({ type: 'AUTH_FAILURE', payload: getErrorMessage(error) });
       throw error;
     }
   };
@@ -412,8 +420,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(response.user));
         dispatch({ type: 'AUTH_UPDATE_USER', payload: response.user });
       }
-    } catch (error: any) {
-      dispatch({ type: 'AUTH_FAILURE', payload: error.message });
+    } catch (error: unknown) {
+      dispatch({ type: 'AUTH_FAILURE', payload: getErrorMessage(error) });
       throw error;
     }
   };
@@ -456,7 +464,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     });
     
     // Reset idle timer
-    try { localStorage.setItem(LAST_ACTIVITY_KEY, Date.now().toString()); } catch {}
+    try {
+      localStorage.setItem(LAST_ACTIVITY_KEY, Date.now().toString());
+    } catch {
+      // Ignore storage failures while resetting idle timer.
+    }
   };
 
   const contextValue: AuthContextType = {

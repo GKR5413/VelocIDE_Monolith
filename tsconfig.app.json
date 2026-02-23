@@ -24,7 +24,10 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
-    }
+    },
+
+    /* Only include these type packages; avoids broken implicit @types/google-protobuf */
+    "types": ["node", "react", "react-dom"]
   },
   "include": ["src"]
 }

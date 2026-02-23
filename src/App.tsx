@@ -23,24 +23,22 @@ function App() {
             <TerminalProvider>
               <Router>
                 <Routes>
-                  {/* Authentication Routes */}
                   <Route path="/auth/login" element={<LoginPage />} />
                   <Route path="/auth/register" element={<RegisterPage />} />
                   <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
                   <Route path="/auth/callback" element={<AuthCallback />} />
                   <Route path="/auth/verify" element={<VerifyOtpPage />} />
 
-                  {/* Protected IDE Routes */}
-                  <Route path="/" element={
-                    <ProtectedRoute>
-                      <Index />
-                    </ProtectedRoute>
-                  } />
+                  <Route
+                    path="/"
+                    element={
+                      <ProtectedRoute>
+                        <Index />
+                      </ProtectedRoute>
+                    }
+                  />
 
-                  {/* Legacy GitHub callback */}
                   <Route path="/github/callback" element={<GitHubCallback />} />
-
-                  {/* Fallback route based on auth */}
                   <Route path="*" element={<FallbackRoute />} />
                 </Routes>
               </Router>
