@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { toast } from '@/hooks/use-toast';
 import '@xterm/xterm/css/xterm.css';
 
 type TerminalTab = {
@@ -8,6 +9,7 @@ type TerminalTab = {
   title: string;
   cwd: string;
   status: 'connecting' | 'connected' | 'disconnected' | 'error';
+  history: string[];
 };
 
 const createTab = (index: number): TerminalTab => ({
@@ -15,6 +17,7 @@ const createTab = (index: number): TerminalTab => ({
   title: `terminal-${index}`,
   cwd: '@workspace',
   status: 'connecting',
+  history: [],
 });
 
 export const BottomContainerTerminal: React.FC = () => {
@@ -22,9 +25,13 @@ export const BottomContainerTerminal: React.FC = () => {
   const xtermRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
+  const currentInputRef = useRef('');
+  const activeTabIdRef = useRef('');
 
   const [tabs, setTabs] = useState<TerminalTab[]>([createTab(1)]);
   const [activeTabId, setActiveTabId] = useState<string>('');
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [statusMessage, setStatusMessage] = useState('');
 
   const activeTab = tabs.find((t) => t.id === activeTabId) || tabs[0] || null;
 
@@ -34,8 +41,34 @@ export const BottomContainerTerminal: React.FC = () => {
     }
   }, [activeTabId, tabs]);
 
+  useEffect(() => {
+    activeTabIdRef.current = activeTabId;
+  }, [activeTabId]);
+
   const updateTab = (tabId: string, patch: Partial<TerminalTab>) => {
     setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, ...patch } : t)));
+  };
+
+  const appendHistory = (tabId: string, command: string) => {
+    const nextCommand = command.trim();
+    if (!nextCommand) return;
+    setTabs((prev) =>
+      prev.map((tab) => {
+        if (tab.id !== tabId) return tab;
+        const deduped = [nextCommand, ...tab.history.filter((item) => item !== nextCommand)];
+        return { ...tab, history: deduped.slice(0, 30) };
+      })
+    );
+  };
+
+  const showStatus = (message: string, variant: 'default' | 'destructive' = 'default') => {
+    setStatusMessage(message);
+    toast({
+      title: 'Terminal',
+      description: message,
+      variant,
+      duration: 2200,
+    });
   };
 
   const connectTab = (tab: TerminalTab, restart = false) => {
@@ -64,6 +97,7 @@ export const BottomContainerTerminal: React.FC = () => {
           restart,
         })
       );
+      showStatus(`Connected ${tab.title}`);
     };
 
     ws.onmessage = (event) => {
@@ -83,12 +117,15 @@ export const BottomContainerTerminal: React.FC = () => {
         }
         if (payload.type === 'error') {
           updateTab(tab.id, { status: 'error' });
-          xtermRef.current?.writeln(`\r\n[error] ${payload.message || 'unknown'}\r`);
+          const message = String(payload.message || 'unknown terminal error');
+          xtermRef.current?.writeln(`\r\n[error] ${message}\r`);
+          showStatus(message, 'destructive');
           return;
         }
         if (payload.type === 'exit') {
           updateTab(tab.id, { status: 'disconnected' });
           xtermRef.current?.writeln(`\r\n[shell exited: ${payload.exitCode}]\r`);
+          showStatus(`Shell exited with code ${payload.exitCode ?? 0}`, 'destructive');
         }
       } catch {
         xtermRef.current?.write(String(event.data || ''));
@@ -98,11 +135,13 @@ export const BottomContainerTerminal: React.FC = () => {
     ws.onclose = () => {
       updateTab(tab.id, { status: 'disconnected' });
       xtermRef.current?.writeln('\r\n[terminal disconnected]\r');
+      showStatus(`${tab.title} disconnected`);
     };
 
     ws.onerror = () => {
       updateTab(tab.id, { status: 'error' });
       xtermRef.current?.writeln('\r\n[terminal connection error]\r');
+      showStatus(`${tab.title} connection error`, 'destructive');
     };
   };
 
@@ -149,6 +188,16 @@ export const BottomContainerTerminal: React.FC = () => {
     fitRef.current = fit;
 
     term.onData((data) => {
+      if (activeTabIdRef.current) {
+        if (data === '\r') {
+          appendHistory(activeTabIdRef.current, currentInputRef.current);
+          currentInputRef.current = '';
+        } else if (data === '\u007f') {
+          currentInputRef.current = currentInputRef.current.slice(0, -1);
+        } else if (data.length === 1 && data >= ' ') {
+          currentInputRef.current += data;
+        }
+      }
       if (socketRef.current?.readyState === WebSocket.OPEN) {
         socketRef.current.send(JSON.stringify({ type: 'input', data }));
       }
@@ -186,6 +235,11 @@ export const BottomContainerTerminal: React.FC = () => {
     if (!xtermRef.current) return;
     connectTab(activeTab);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTabId]);
+
+  useEffect(() => {
+    currentInputRef.current = '';
+    setHistoryOpen(false);
   }, [activeTabId]);
 
   const addTab = () => {
@@ -227,6 +281,16 @@ export const BottomContainerTerminal: React.FC = () => {
       socketRef.current.close();
     }
     if (activeTab) updateTab(activeTab.id, { status: 'disconnected' });
+    showStatus('Active terminal killed');
+  };
+
+  const runFromHistory = (command: string) => {
+    if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
+      showStatus('Terminal is not connected', 'destructive');
+      return;
+    }
+    socketRef.current.send(JSON.stringify({ type: 'input', data: `${command}\r` }));
+    setHistoryOpen(false);
   };
 
   return (
@@ -250,6 +314,31 @@ export const BottomContainerTerminal: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-1">
+          <div className="relative">
+            <button
+              onClick={() => setHistoryOpen((prev) => !prev)}
+              className="px-2 py-1 rounded bg-[#161616] border border-[#333]"
+            >
+              History
+            </button>
+            {historyOpen && (
+              <div className="absolute right-0 top-8 z-20 w-96 max-h-64 overflow-auto rounded border border-[#333] bg-[#121212] shadow-xl">
+                {!activeTab?.history.length ? (
+                  <div className="px-2 py-2 text-[11px] text-gray-400">No command history yet.</div>
+                ) : (
+                  activeTab.history.map((item, idx) => (
+                    <button
+                      key={`${item}-${idx}`}
+                      onClick={() => runFromHistory(item)}
+                      className="w-full text-left px-2 py-1.5 text-[11px] text-gray-200 hover:bg-[#1d1d1d] font-mono border-b border-[#222]"
+                    >
+                      {item}
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
           <button onClick={reconnectActive} className="px-2 py-1 rounded bg-[#161616] border border-[#333]">Reconnect</button>
           <button onClick={restartActive} className="px-2 py-1 rounded bg-[#161616] border border-[#333]">Restart</button>
           <button onClick={killActive} className="px-2 py-1 rounded bg-[#161616] border border-[#333]">Kill</button>
@@ -258,6 +347,11 @@ export const BottomContainerTerminal: React.FC = () => {
           </span>
         </div>
       </div>
+      {!!statusMessage && (
+        <div className="px-2 py-1 text-[11px] text-gray-400 border-b border-[#212121] bg-[#0f0f0f]">
+          {statusMessage}
+        </div>
+      )}
       <div ref={hostRef} className="flex-1 min-h-0" />
     </div>
   );

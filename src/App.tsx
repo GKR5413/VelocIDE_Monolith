@@ -12,6 +12,7 @@ import { IDEProvider } from './contexts/IDEContext';
 import { GitHubProvider } from './contexts/GitHubContext';
 import { AuthProvider, ProtectedRoute, useAuth } from './contexts/AuthContext';
 import { TerminalProvider } from './contexts/TerminalContext';
+import { Toaster } from './components/ui/toaster';
 import './index.css';
 
 function App() {
@@ -42,6 +43,7 @@ function App() {
                   <Route path="*" element={<FallbackRoute />} />
                 </Routes>
               </Router>
+              <Toaster />
             </TerminalProvider>
           </GitHubProvider>
         </IDEProvider>
