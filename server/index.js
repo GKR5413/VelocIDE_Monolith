@@ -372,38 +372,52 @@ const resolveLatestTomcatVersion = async (major) => {
   }
 };
 
-const maybeFixTomcatDownloadCommand = async (command) => {
+const buildMirrorCandidates = (originalUrl) => {
+  const candidates = [originalUrl];
+  if (originalUrl.includes('://downloads.apache.org/')) {
+    candidates.push(originalUrl.replace('://downloads.apache.org/', '://archive.apache.org/dist/'));
+    candidates.push(originalUrl.replace('://downloads.apache.org/', '://dlcdn.apache.org/'));
+  }
+  if (originalUrl.includes('://dlcdn.apache.org/')) {
+    candidates.push(originalUrl.replace('://dlcdn.apache.org/', '://downloads.apache.org/'));
+    candidates.push(originalUrl.replace('://dlcdn.apache.org/', '://archive.apache.org/dist/'));
+  }
+  if (originalUrl.includes('://archive.apache.org/dist/')) {
+    candidates.push(originalUrl.replace('://archive.apache.org/dist/', '://downloads.apache.org/'));
+  }
+  return [...new Set(candidates)];
+};
+
+const resolveDownloadUrl = async (originalUrl) => {
+  const tomcatMatch = originalUrl.match(/\/tomcat\/(tomcat-(\d+))\/v(\d+\.\d+\.\d+)\/bin\/(apache-tomcat-(\d+\.\d+\.\d+)\.tar\.gz)/);
+  if (tomcatMatch) {
+    const major = tomcatMatch[2];
+    const latest = await resolveLatestTomcatVersion(major);
+    if (latest) {
+      const latestFile = `apache-tomcat-${latest}.tar.gz`;
+      const latestCandidates = [
+        `https://downloads.apache.org/tomcat/tomcat-${major}/v${latest}/bin/${latestFile}`,
+        `https://archive.apache.org/dist/tomcat/tomcat-${major}/v${latest}/bin/${latestFile}`,
+        `https://dlcdn.apache.org/tomcat/tomcat-${major}/v${latest}/bin/${latestFile}`,
+      ];
+      for (const candidate of latestCandidates) {
+        if (await urlExists(candidate)) return candidate;
+      }
+    }
+  }
+
+  for (const candidate of buildMirrorCandidates(originalUrl)) {
+    if (await urlExists(candidate)) return candidate;
+  }
+  return originalUrl;
+};
+
+const maybeFixInstallOrDownloadCommand = async (command) => {
   const urlMatch = command.match(/https?:\/\/[^\s'"`]+/);
   if (!urlMatch) return command;
-
   const originalUrl = urlMatch[0];
-  const tomcatMatch = originalUrl.match(/\/tomcat\/(tomcat-(\d+))\/v(\d+\.\d+\.\d+)\/bin\/(apache-tomcat-(\d+\.\d+\.\d+)\.tar\.gz)/);
-  if (!tomcatMatch) return command;
-
-  if (await urlExists(originalUrl)) return command;
-
-  const major = tomcatMatch[2];
-  const latest = await resolveLatestTomcatVersion(major);
-  if (latest) {
-    const latestFile = `apache-tomcat-${latest}.tar.gz`;
-    const primary = `https://downloads.apache.org/tomcat/tomcat-${major}/v${latest}/bin/${latestFile}`;
-    if (await urlExists(primary)) {
-      return command.replace(originalUrl, primary);
-    }
-    const archive = `https://archive.apache.org/dist/tomcat/tomcat-${major}/v${latest}/bin/${latestFile}`;
-    if (await urlExists(archive)) {
-      return command.replace(originalUrl, archive);
-    }
-  }
-
-  const requestedVersion = tomcatMatch[3];
-  const requestedFile = tomcatMatch[4];
-  const archiveFallback = `https://archive.apache.org/dist/tomcat/tomcat-${major}/v${requestedVersion}/bin/${requestedFile}`;
-  if (await urlExists(archiveFallback)) {
-    return command.replace(originalUrl, archiveFallback);
-  }
-
-  return command;
+  const resolvedUrl = await resolveDownloadUrl(originalUrl);
+  return resolvedUrl === originalUrl ? command : command.replace(originalUrl, resolvedUrl);
 };
 
 const executeCommandBatch = async ({ command, cwd = '.', sessionId }) => {
@@ -412,7 +426,7 @@ const executeCommandBatch = async ({ command, cwd = '.', sessionId }) => {
 
   const steps = [];
   for (const rawCommand of commands) {
-    const prepared = await maybeFixTomcatDownloadCommand(rawCommand);
+    const prepared = await maybeFixInstallOrDownloadCommand(rawCommand);
     const result = await executeSingleCommand({ command: prepared, cwd, sessionId });
     steps.push(result);
     if (result.exitCode !== 0) break;
