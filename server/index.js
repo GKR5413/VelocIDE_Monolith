@@ -25,6 +25,7 @@ const MAX_AGENT_REPLANS = Number(process.env.MAX_AGENT_REPLANS || 3);
 
 const geminiClient = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
 const terminalSessions = new Map();
+const sessionApprovalTokens = new Map();
 
 app.use(express.json({ limit: '2mb' }));
 
@@ -38,6 +39,12 @@ const blockedCommandPatterns = [
   /^\s*mount(\s|$)/i,
   /^\s*umount(\s|$)/i,
   /\bchmod\s+777\s+\/\b/i,
+];
+
+const approvalCommandPatterns = [
+  { id: 'delete_files', pattern: /\brm(\s|$)/i, reason: 'Deletes files or directories.' },
+  { id: 'network_install', pattern: /\b(apk|apt|apt-get|yum|dnf|pip|npm|pnpm|yarn)\s+(add|install)\b/i, reason: 'Installs packages from network/system repositories.' },
+  { id: 'remote_fetch', pattern: /\b(curl|wget)\b/i, reason: 'Fetches remote content over network.' },
 ];
 
 const ensureWorkspace = async () => {
@@ -189,6 +196,37 @@ const validateCommand = (command) => {
   const blocked = blockedCommandPatterns.find((pattern) => pattern.test(value));
   if (blocked) throw new Error('Command blocked by sandbox policy');
   return value;
+};
+
+const toApprovalToken = (sessionId, command) =>
+  Buffer.from(`${String(sessionId || 'session')}::${String(command || '').trim()}`).toString('base64url');
+
+const getCommandApprovalRequirement = (command, sessionId) => {
+  const value = String(command || '').trim();
+  const matched = approvalCommandPatterns.find((rule) => rule.pattern.test(value));
+  if (!matched) return null;
+  return {
+    token: toApprovalToken(sessionId, value),
+    command: value,
+    reason: matched.reason,
+    ruleId: matched.id,
+  };
+};
+
+const grantApprovalTokens = (sessionId, tokens = []) => {
+  if (!sessionId || !Array.isArray(tokens) || !tokens.length) return;
+  const existing = sessionApprovalTokens.get(sessionId) || new Set();
+  for (const token of tokens) existing.add(String(token));
+  sessionApprovalTokens.set(sessionId, existing);
+};
+
+const consumeApprovalToken = (sessionId, token) => {
+  if (!sessionId || !token) return false;
+  const existing = sessionApprovalTokens.get(sessionId);
+  if (!existing || !existing.has(token)) return false;
+  existing.delete(token);
+  sessionApprovalTokens.set(sessionId, existing);
+  return true;
 };
 
 const extractLatestCwd = (rawOutput = '') => {
@@ -524,8 +562,21 @@ const parseAgentPlan = (text = '') => {
 const executeToolCall = async ({ tool, args = {}, sessionId }) => {
   switch (tool) {
     case 'run_command': {
+      const command = String(args.command || '');
+      const approval = getCommandApprovalRequirement(command, sessionId);
+      if (approval && !consumeApprovalToken(sessionId, approval.token)) {
+        return {
+          ok: false,
+          tool,
+          args,
+          approvalRequired: approval,
+          result: null,
+          terminalOutputs: [],
+        };
+      }
+
       const result = await executeCommandBatch({
-        command: String(args.command || ''),
+        command,
         cwd: String(args.cwd || '.'),
         sessionId,
       });
@@ -582,6 +633,7 @@ const runAgentLoop = async ({ model, messages, sessionId }) => {
   let latestText = '';
   let latestSteps = [];
   let latestToolResults = [];
+  let pendingApprovals = [];
 
   for (let attempt = 1; attempt <= MAX_AGENT_REPLANS + 1; attempt += 1) {
     latestText = await callGemini({ model, messages: history });
@@ -598,6 +650,7 @@ const runAgentLoop = async ({ model, messages, sessionId }) => {
             isRunning: false,
           })),
           toolResults: latestToolResults,
+          pendingApprovals,
           attempts: attempt,
           status: 'success',
         };
@@ -614,6 +667,20 @@ const runAgentLoop = async ({ model, messages, sessionId }) => {
             args: toolCall.args,
             sessionId,
           });
+          if (outcome.approvalRequired) {
+            pendingApprovals = [outcome.approvalRequired];
+            attemptToolResults.push({
+              id: toolCall.id,
+              tool: toolCall.tool,
+              args: toolCall.args,
+              ok: false,
+              error: `Approval required: ${outcome.approvalRequired.reason}`,
+              result: null,
+              approvalRequired: outcome.approvalRequired,
+            });
+            failed = true;
+            break;
+          }
           attemptToolResults.push({
             id: toolCall.id,
             tool: toolCall.tool,
@@ -651,6 +718,22 @@ const runAgentLoop = async ({ model, messages, sessionId }) => {
       latestSteps = [...latestSteps, ...attemptSteps];
       const compactResults = attemptToolResults.map(serializeToolResultForModel);
 
+      if (pendingApprovals.length > 0) {
+        return {
+          content: parsedPlan.assistantResponse || 'Approval required to continue.',
+          terminalOutputs: latestSteps.map((step) => ({
+            command: step.command,
+            output: step.output,
+            exitCode: step.exitCode,
+            isRunning: false,
+          })),
+          toolResults: latestToolResults,
+          pendingApprovals,
+          attempts: attempt,
+          status: 'approval_required',
+        };
+      }
+
       history.push({ role: 'assistant', content: latestText });
       history.push({
         role: 'user',
@@ -664,7 +747,14 @@ const runAgentLoop = async ({ model, messages, sessionId }) => {
     const blocks = extractShellBlocks(latestText);
 
     if (!blocks.length) {
-      return { content: latestText, terminalOutputs: [], toolResults: latestToolResults, attempts: attempt, status: 'no_commands' };
+      return {
+        content: latestText,
+        terminalOutputs: [],
+        toolResults: latestToolResults,
+        pendingApprovals,
+        attempts: attempt,
+        status: 'no_commands',
+      };
     }
 
     const attemptSteps = [];
@@ -696,6 +786,7 @@ const runAgentLoop = async ({ model, messages, sessionId }) => {
           isRunning: false,
         })),
         toolResults: latestToolResults,
+        pendingApprovals,
         attempts: attempt,
         status: 'success',
       };
@@ -730,6 +821,7 @@ const runAgentLoop = async ({ model, messages, sessionId }) => {
       isRunning: false,
     })),
     toolResults: latestToolResults,
+    pendingApprovals,
     attempts: MAX_AGENT_REPLANS + 1,
     status: 'failed',
   };
@@ -778,21 +870,26 @@ app.post('/api/files', async (req, res) => {
 
 app.post('/api/agent', async (req, res) => {
   try {
-    const { model, messages, sessionId } = req.body || {};
+    const { model, messages, sessionId, approvals } = req.body || {};
     if (!geminiClient) {
       res.json({
         content: 'Gemini is not configured yet. Set GEMINI_API_KEY and restart container.',
         terminalOutputs: [],
+        toolResults: [],
+        pendingApprovals: [],
         attempts: 0,
         status: 'not_configured',
       });
       return;
     }
 
+    const normalizedSessionId = sessionId || `agent-${Date.now()}`;
+    grantApprovalTokens(normalizedSessionId, Array.isArray(approvals) ? approvals : []);
+
     const result = await runAgentLoop({
       model,
       messages: Array.isArray(messages) ? messages : [],
-      sessionId: sessionId || `agent-${Date.now()}`,
+      sessionId: normalizedSessionId,
     });
 
     res.json(result);

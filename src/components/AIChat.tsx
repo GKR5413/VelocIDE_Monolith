@@ -18,6 +18,12 @@ interface AgentToolResult {
   error?: string | null;
 }
 
+interface PendingApproval {
+  token: string;
+  command: string;
+  reason: string;
+}
+
 interface ChatMessage {
   id: string;
   type: 'user' | 'ai';
@@ -26,6 +32,7 @@ interface ChatMessage {
   model?: string;
   terminalOutputs?: TerminalOutput[];
   toolResults?: AgentToolResult[];
+  pendingApprovals?: PendingApproval[];
 }
 
 interface AgentHistoryMessage {
@@ -121,6 +128,7 @@ export const AIChat: React.FC = () => {
         model: currentModel.label,
         terminalOutputs: Array.isArray(data?.terminalOutputs) ? data.terminalOutputs : [],
         toolResults: Array.isArray(data?.toolResults) ? data.toolResults : [],
+        pendingApprovals: Array.isArray(data?.pendingApprovals) ? data.pendingApprovals : [],
       };
 
       setMessages((prev) => [...prev, aiMessage]);
@@ -137,6 +145,59 @@ export const AIChat: React.FC = () => {
       setIsLoading(false);
     }
   }, [inputValue, isLoading, messageContentForAgent, messages, selectedModel]);
+
+  const approveCommand = useCallback(async (token: string) => {
+    if (isLoading) return;
+    const currentModel = models.find((m) => m.value === selectedModel) || models[0];
+    setIsLoading(true);
+    try {
+      const history: AgentHistoryMessage[] = messages.map((msg) => ({
+        role: msg.type === 'user' ? 'user' : 'assistant',
+        content: messageContentForAgent(msg),
+      }));
+
+      const response = await fetch('/api/agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: currentModel.provider,
+          model: selectedModel,
+          sessionId: sessionIdRef.current,
+          approvals: [token],
+          messages: history,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Agent service error: ${response.status} ${errorText}`);
+      }
+
+      const data = await response.json();
+      const aiMessage: ChatMessage = {
+        id: `${Date.now()}-ai-approval`,
+        type: 'ai',
+        content: data?.content || 'No response generated.',
+        timestamp: new Date(),
+        model: currentModel.label,
+        terminalOutputs: Array.isArray(data?.terminalOutputs) ? data.terminalOutputs : [],
+        toolResults: Array.isArray(data?.toolResults) ? data.toolResults : [],
+        pendingApprovals: Array.isArray(data?.pendingApprovals) ? data.pendingApprovals : [],
+      };
+      setMessages((prev) => [...prev, aiMessage]);
+    } catch (error) {
+      const errorMessage: ChatMessage = {
+        id: `${Date.now()}-approval-err`,
+        type: 'ai',
+        content: `Approval retry failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        timestamp: new Date(),
+        model: currentModel.label,
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [isLoading, messageContentForAgent, messages, selectedModel]);
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -220,6 +281,26 @@ export const AIChat: React.FC = () => {
                     >
                       <span className="font-semibold">{tool.ok ? 'OK' : 'FAIL'}</span> {tool.tool}
                       {tool.error ? ` - ${tool.error}` : ''}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {message.pendingApprovals && message.pendingApprovals.length > 0 && (
+                <div className="mt-2 space-y-2">
+                  {message.pendingApprovals.map((approval, idx) => (
+                    <div key={`${approval.token}-${idx}`} className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-100">
+                      <div className="font-semibold">Approval required</div>
+                      <div className="font-mono mt-1">$ {approval.command}</div>
+                      <div className="mt-1">{approval.reason}</div>
+                      <Button
+                        size="sm"
+                        className="mt-2 h-7 px-2 text-xs"
+                        onClick={() => approveCommand(approval.token)}
+                        disabled={isLoading}
+                      >
+                        Allow once
+                      </Button>
                     </div>
                   ))}
                 </div>
