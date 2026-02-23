@@ -39,6 +39,8 @@ interface IDEState {
   saveActiveToDisk: () => Promise<void>;
   createFile: (parentNode?: IDEFileNode) => Promise<void>;
   createFolder: (parentNode?: IDEFileNode) => Promise<void>;
+  createFolderAtPath: (parentPath: string, folderName: string) => Promise<void>;
+  openFolder: (folderPath: string) => Promise<void>;
   renameNode: (node: IDEFileNode, newName: string) => Promise<void>;
   deleteNode: (node: IDEFileNode) => Promise<void>;
   createUntitledTab: () => void;
@@ -62,6 +64,7 @@ const IDEContext = createContext<IDEState | undefined>(undefined);
 // 3. PROVIDER COMPONENT (Exported)
 export const IDEProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [files, setFiles] = useState<IDEFileNode[]>([]);
+  const [currentFolderPath, setCurrentFolderPath] = useState<string>('.');
   const editorRef = useRef<EditorRefValue | null>(null);
   const [tabs, setTabs] = useState<IDETab[]>(() => {
     const saved = localStorage.getItem('ide-tabs');
@@ -113,7 +116,7 @@ export const IDEProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const refreshFileTree = useCallback(async () => {
     console.log('refreshFileTree called');
     try {
-      const rootNodes = await fileSystemService.getDirectoryContents('.');
+      const rootNodes = await fileSystemService.getDirectoryContents(currentFolderPath);
       console.log('Root nodes received:', rootNodes);
       const convertedNodes = rootNodes.files.map(item => fileSystemService.convertToFileNode(item, new Set()));
       console.log('Converted nodes:', convertedNodes);
@@ -121,7 +124,7 @@ export const IDEProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (error) {
       console.error('Error in refreshFileTree:', error);
     }
-  }, []);
+  }, [currentFolderPath]);
 
   useEffect(() => {
     refreshFileTree();
@@ -287,7 +290,7 @@ export const IDEProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const createFile = useCallback(async (parentNode?: IDEFileNode) => {
     const fileName = prompt("Enter the new file's name:");
     if (fileName) {
-      const parentPath = parentNode && parentNode.type === 'folder' ? parentNode.path : '.';
+      const parentPath = parentNode && parentNode.type === 'folder' ? parentNode.path : currentFolderPath;
       const newPath = path.join(parentPath, fileName);
       try {
         await fileSystemService.createFileOrFolder(newPath, 'file');
@@ -296,12 +299,12 @@ export const IDEProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         console.error('Failed to create file:', error);
       }
     }
-  }, [refreshFileTree]);
+  }, [currentFolderPath, refreshFileTree]);
 
   const createFolder = useCallback(async (parentNode?: IDEFileNode) => {
     const folderName = prompt("Enter the new folder's name:");
     if (folderName) {
-      const parentPath = parentNode && parentNode.type === 'folder' ? parentNode.path : '.';
+      const parentPath = parentNode && parentNode.type === 'folder' ? parentNode.path : currentFolderPath;
       const newPath = path.join(parentPath, folderName);
       try {
         await fileSystemService.createFileOrFolder(newPath, 'folder');
@@ -310,7 +313,24 @@ export const IDEProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         console.error('Failed to create folder:', error);
       }
     }
-  }, [refreshFileTree]);
+  }, [currentFolderPath, refreshFileTree]);
+
+  const createFolderAtPath = useCallback(async (parentPath: string, folderName: string) => {
+    const cleanName = String(folderName || '').trim();
+    if (!cleanName) throw new Error('Folder name is required');
+    const base = String(parentPath || currentFolderPath || '.');
+    const newPath = path.join(base, cleanName);
+    await fileSystemService.createFileOrFolder(newPath, 'folder');
+    await refreshFileTree();
+  }, [currentFolderPath, refreshFileTree]);
+
+  const openFolder = useCallback(async (folderPath: string) => {
+    const nextPath = String(folderPath || '.').trim() || '.';
+    const response = await fileSystemService.getDirectoryContents(nextPath);
+    const convertedNodes = response.files.map(item => fileSystemService.convertToFileNode(item, new Set()));
+    setCurrentFolderPath(nextPath);
+    setFiles(convertedNodes);
+  }, []);
 
   const renameNode = useCallback(async (node: IDEFileNode, newName: string) => {
     try {
@@ -432,6 +452,8 @@ export const IDEProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     },
     createFile,
     createFolder,
+    createFolderAtPath,
+    openFolder,
     renameNode,
     deleteNode,
     createUntitledTab,

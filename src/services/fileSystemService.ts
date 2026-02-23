@@ -129,6 +129,10 @@ class FileSystemService {
     return this.request({ action: 'rename', path: source, newPath: destination });
   }
 
+  async copyFileOrFolder(source: string, destination: string): Promise<any> {
+    return this.request({ action: 'copy', path: source, newPath: destination });
+  }
+
   // Browser File API methods for cross-platform support
   async promptForNewFileName(parentPath: string): Promise<string | null> {
     return prompt('Enter new file name:');
@@ -188,7 +192,7 @@ class FileSystemService {
   }
 
   async copyNode(source: any, target: any): Promise<void> {
-    console.log(`Would copy ${source.path} to ${target.path}`);
+    await this.copyFileOrFolder(source.path, target.path);
   }
 
   async cutNode(source: any, target: any): Promise<void> {

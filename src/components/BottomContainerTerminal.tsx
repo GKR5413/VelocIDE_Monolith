@@ -293,6 +293,32 @@ export const BottomContainerTerminal: React.FC = () => {
     setHistoryOpen(false);
   };
 
+  useEffect(() => {
+    const onTerminalAction = (event: Event) => {
+      const customEvent = event as CustomEvent<{ action?: 'new' | 'reconnect' | 'restart' | 'kill' }>;
+      const action = customEvent.detail?.action;
+      if (!action) return;
+      if (action === 'new') {
+        addTab();
+        return;
+      }
+      if (action === 'reconnect') {
+        reconnectActive();
+        return;
+      }
+      if (action === 'restart') {
+        restartActive();
+        return;
+      }
+      if (action === 'kill') {
+        killActive();
+      }
+    };
+
+    window.addEventListener('velocide:terminal:action', onTerminalAction);
+    return () => window.removeEventListener('velocide:terminal:action', onTerminalAction);
+  });
+
   return (
     <div className="h-full w-full flex flex-col bg-[#101010] border-t border-ide-panel-border">
       <div className="h-8 px-2 flex items-center justify-between border-b border-[#2a2a2a] text-xs text-gray-300 gap-2">

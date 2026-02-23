@@ -190,6 +190,14 @@ const deleteNode = async (inputPath) => {
   return { success: true, path: relativePath };
 };
 
+const copyNode = async (fromPath, toPath) => {
+  const { resolved: fromResolved, relativePath: fromRelative } = resolveSandboxPath(fromPath);
+  const { resolved: toResolved, relativePath: toRelative } = resolveSandboxPath(toPath);
+  await fs.mkdir(path.dirname(toResolved), { recursive: true });
+  await fs.cp(fromResolved, toResolved, { recursive: true, force: false, errorOnExist: true });
+  return { success: true, from: fromRelative, to: toRelative };
+};
+
 const runProcess = async (cmd, args, options = {}) =>
   await new Promise((resolve, reject) => {
     const child = spawn(cmd, args, {
@@ -947,6 +955,9 @@ app.post('/api/files', async (req, res) => {
         return;
       case 'delete':
         res.json(await deleteNode(req.body.path));
+        return;
+      case 'copy':
+        res.json(await copyNode(req.body.path, req.body.newPath));
         return;
       case 'execute':
         res.json(await executeCommandBatch({

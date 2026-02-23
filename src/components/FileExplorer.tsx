@@ -1,174 +1,129 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { 
-  File, 
-  Folder, 
-  FolderOpen,
-  Pencil,
-  Trash,
-  FolderPlus,
-  FilePlus,
-  Copy,
-  Scissors,
-  Clipboard,
-  ExternalLink,
-  GitBranch,
-  RotateCcw,
-  Circle,
-  X,
-  Loader,
-  Code2,
-  Database,
-  Image,
-  Settings,
-  FileText,
-  Lock,
-  Zap,
-  Palette,
-  Globe,
-  Package,
-  Terminal,
-  Key,
-  Archive,
-  FileImage,
-  Braces
-} from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { useIDE, IDEFileNode } from '@/contexts/IDEContext';
-import { fileSystemService } from '@/services/fileSystemService';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { File, Folder, FolderOpen, RotateCcw } from 'lucide-react';
 import path from 'path-browserify';
+import { IDEFileNode, useIDE } from '@/contexts/IDEContext';
+import { fileSystemService } from '@/services/fileSystemService';
+import { toast } from '@/hooks/use-toast';
 
-interface ContextMenuProps {
-  x: number;
-  y: number;
+type ClipboardState = {
   node: IDEFileNode;
-  onClose: () => void;
-  onAction: (action: string, node: IDEFileNode) => void;
-}
+  mode: 'copy' | 'cut';
+} | null;
 
-type MenuItem =
-  | { separator: true }
-  | { icon: React.ComponentType<{ className?: string }>; label: string; action: string };
+type MenuAction =
+  | 'open'
+  | 'newFile'
+  | 'newFolder'
+  | 'rename'
+  | 'delete'
+  | 'copy'
+  | 'cut'
+  | 'paste';
 
-const MENU_ITEMS: MenuItem[] = [
-  { icon: FilePlus, label: 'New File', action: 'newFile' },
-  { icon: FolderPlus, label: 'New Folder', action: 'newFolder' },
-  { separator: true },
-  { icon: Pencil, label: 'Rename', action: 'rename' },
-  { icon: Trash, label: 'Delete', action: 'delete' },
-];
-
-const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, onClose, onAction }) => {
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        onClose();
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [onClose]);
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
-
-  return (
-    <div
-      ref={menuRef}
-      role="menu"
-      aria-label="File context menu"
-      className="fixed bg-white dark:bg-[#252526] border dark:border-[#454545] shadow-lg rounded py-1 z-50 min-w-[160px]"
-      style={{ left: x, top: y }}
-    >
-      {MENU_ITEMS.map((item, index) => {
-        if ('separator' in item) {
-          return <div key={`sep-${index}`} className="h-px bg-gray-200 dark:bg-[#454545] my-1" aria-hidden />;
-        }
-        const { action, icon: Icon, label } = item;
-        return (
-          <div
-            key={action}
-            role="menuitem"
-            tabIndex={0}
-            className="flex items-center gap-2 px-3 py-1.5 hover:bg-blue-500 hover:text-white cursor-pointer text-sm"
-            onClick={() => {
-              onAction(action, node);
-              onClose();
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                onAction(action, node);
-                onClose();
-              }
-            }}
-          >
-            {Icon && <Icon className="w-4 h-4" />}
-            <span>{label}</span>
-          </div>
-        );
-      })}
-    </div>
-  );
+type MenuItem = {
+  key: MenuAction;
+  label: string;
+  disabled?: boolean;
 };
 
-interface FileTreeNodeProps {
+type ContextMenuState = {
+  x: number;
+  y: number;
+  node: IDEFileNode | null;
+} | null;
+
+const PROTECTED_ROOTS = new Set(['@workspace', '@home']);
+
+const isProtected = (node: IDEFileNode | null) => !!node && PROTECTED_ROOTS.has(node.path);
+
+const buildCopyName = (name: string) => {
+  const dot = name.lastIndexOf('.');
+  if (dot <= 0) return `${name}-copy`;
+  return `${name.slice(0, dot)}-copy${name.slice(dot)}`;
+};
+
+interface NodeRowProps {
   node: IDEFileNode;
   level: number;
-  onSelect: (node: IDEFileNode) => void;
-  onToggle: (node: IDEFileNode) => void;
   selectedId?: string;
   expandedNodes: Set<string>;
+  onSelect: (node: IDEFileNode) => void;
+  onToggle: (node: IDEFileNode) => void;
+  onContextMenu: (event: React.MouseEvent, node: IDEFileNode) => void;
 }
 
-const FileTreeNode: React.FC<FileTreeNodeProps> = ({ node, level, onSelect, onToggle, selectedId, expandedNodes }) => {
+const NodeRow: React.FC<NodeRowProps> = ({
+  node,
+  level,
+  selectedId,
+  expandedNodes,
+  onSelect,
+  onToggle,
+  onContextMenu,
+}) => {
   const isExpanded = expandedNodes.has(node.id);
-  const indent = level * 12;
   const isSelected = selectedId === node.id;
-
-  const getIcon = () => {
-    if (node.type === 'folder') return isExpanded ? <FolderOpen className="w-4 h-4 text-blue-400" /> : <Folder className="w-4 h-4 text-blue-400" />;
-    return <File className="w-4 h-4 text-gray-400" />;
-  };
+  const indent = level * 14;
 
   return (
     <div>
-      <div 
-        className={`flex items-center gap-2 py-1 px-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-[#2a2d2e] ${isSelected ? 'bg-blue-100 dark:bg-[#37373d]' : ''}`}
+      <div
+        className={`flex items-center gap-2 px-2 py-1 text-sm cursor-pointer hover:bg-gray-100 dark:hover:bg-[#2a2d2e] ${
+          isSelected ? 'bg-blue-100 dark:bg-[#37373d]' : ''
+        }`}
         style={{ paddingLeft: `${indent + 8}px` }}
-        onClick={() => { onSelect(node); if(node.type === 'folder') onToggle(node); }}
+        onClick={() => {
+          onSelect(node);
+          if (node.type === 'folder') onToggle(node);
+        }}
+        onContextMenu={(event) => onContextMenu(event, node)}
       >
-        {getIcon()}
-        <span className="text-sm truncate">{node.name}</span>
+        {node.type === 'folder' ? (
+          isExpanded ? <FolderOpen className="w-4 h-4 text-blue-400" /> : <Folder className="w-4 h-4 text-blue-400" />
+        ) : (
+          <File className="w-4 h-4 text-gray-400" />
+        )}
+        <span className="truncate">{node.name}</span>
       </div>
-      {node.type === 'folder' && isExpanded && node.children?.map(child => (
-        <FileTreeNode key={child.id} node={child} level={level + 1} onSelect={onSelect} onToggle={onToggle} selectedId={selectedId} expandedNodes={expandedNodes} />
-      ))}
+      {node.type === 'folder' &&
+        isExpanded &&
+        node.children?.map((child) => (
+          <NodeRow
+            key={child.id}
+            node={child}
+            level={level + 1}
+            selectedId={selectedId}
+            expandedNodes={expandedNodes}
+            onSelect={onSelect}
+            onToggle={onToggle}
+            onContextMenu={onContextMenu}
+          />
+        ))}
     </div>
   );
 };
 
 const FileExplorer: React.FC = () => {
-  const { files, openFile, refreshFileTree, loadNodeChildren } = useIDE();
+  const { files, openFile, createFile, createFolder, renameNode, deleteNode, refreshFileTree, loadNodeChildren } = useIDE();
   const [expanded, setExpanded] = useState<Set<string>>(new Set(['@workspace']));
-  const [selectedId, setSelectedId] = useState<string | undefined>();
+  const [selectedId, setSelectedId] = useState<string>();
+  const [menu, setMenu] = useState<ContextMenuState>(null);
+  const [clipboard, setClipboard] = useState<ClipboardState>(null);
 
-  const toggleFolder = useCallback(async (node: IDEFileNode) => {
-    const next = new Set(expanded);
-    if (next.has(node.id)) next.delete(node.id);
-    else next.add(node.id);
-    setExpanded(next);
-    if (!node.children || node.children.length === 0) await loadNodeChildren(node);
-  }, [expanded, loadNodeChildren]);
+  const selectedNode = useMemo(
+    () => (menu?.node ? menu.node : files.find((f) => f.id === selectedId) || null),
+    [files, menu?.node, selectedId]
+  );
 
-  useEffect(() => { refreshFileTree(); }, [refreshFileTree]);
+  useEffect(() => {
+    void refreshFileTree();
+  }, [refreshFileTree]);
+
+  useEffect(() => {
+    const closeMenu = () => setMenu(null);
+    window.addEventListener('click', closeMenu);
+    return () => window.removeEventListener('click', closeMenu);
+  }, []);
 
   useEffect(() => {
     files.forEach((node) => {
@@ -178,17 +133,182 @@ const FileExplorer: React.FC = () => {
     });
   }, [files, expanded, loadNodeChildren]);
 
+  const toggleFolder = useCallback(
+    async (node: IDEFileNode) => {
+      if (node.type !== 'folder') return;
+      const next = new Set(expanded);
+      if (next.has(node.id)) next.delete(node.id);
+      else next.add(node.id);
+      setExpanded(next);
+      if (!node.children || node.children.length === 0) {
+        await loadNodeChildren(node);
+      }
+    },
+    [expanded, loadNodeChildren]
+  );
+
+  const openContextMenu = (event: React.MouseEvent, node: IDEFileNode | null) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setMenu({ x: event.clientX, y: event.clientY, node });
+  };
+
+  const menuItems = useMemo(() => {
+    const node = menu?.node;
+    const protectedRoot = isProtected(node);
+    const targetFolder = node?.type === 'folder';
+    const canPaste = !!clipboard && (targetFolder || node === null);
+
+    const common: MenuItem[] = [
+      { key: 'newFile', label: 'New File', disabled: !!node && !targetFolder },
+      { key: 'newFolder', label: 'New Folder', disabled: !!node && !targetFolder },
+      { key: 'paste', label: clipboard?.mode === 'cut' ? 'Paste (Move)' : 'Paste', disabled: !canPaste },
+    ];
+
+    if (!node) return common;
+
+    if (node.type === 'file') {
+      return [
+        { key: 'open', label: 'Open' },
+        { key: 'copy', label: 'Copy' },
+        { key: 'cut', label: 'Move (Cut)' },
+        { key: 'rename', label: 'Rename' },
+        { key: 'delete', label: 'Delete' },
+      ];
+    }
+
+    return [
+      { key: 'newFile', label: 'New File' },
+      { key: 'newFolder', label: 'New Folder' },
+      { key: 'copy', label: 'Copy Folder' },
+      { key: 'cut', label: 'Move Folder', disabled: protectedRoot },
+      { key: 'paste', label: clipboard?.mode === 'cut' ? 'Paste (Move)' : 'Paste', disabled: !canPaste },
+      { key: 'rename', label: 'Rename', disabled: protectedRoot },
+      { key: 'delete', label: 'Delete', disabled: protectedRoot },
+    ];
+  }, [clipboard, menu?.node]);
+
+  const getPasteTarget = (node: IDEFileNode | null) => {
+    if (!node) return '@workspace';
+    if (node.type === 'folder') return node.path;
+    return path.dirname(node.path);
+  };
+
+  const handleAction = async (action: MenuAction) => {
+    const node = menu?.node || null;
+    setMenu(null);
+    try {
+      if (action === 'open' && node?.type === 'file') {
+        await openFile(node);
+        return;
+      }
+      if (action === 'newFile') {
+        if (node?.type === 'folder') await createFile(node);
+        else await createFile();
+        return;
+      }
+      if (action === 'newFolder') {
+        if (node?.type === 'folder') await createFolder(node);
+        else await createFolder();
+        return;
+      }
+      if (action === 'rename' && node) {
+        if (isProtected(node)) return;
+        const nextName = prompt('New name', node.name);
+        if (!nextName?.trim()) return;
+        await renameNode(node, nextName.trim());
+        return;
+      }
+      if (action === 'delete' && node) {
+        if (isProtected(node)) return;
+        await deleteNode(node);
+        return;
+      }
+      if (action === 'copy' && node) {
+        setClipboard({ node, mode: 'copy' });
+        toast({ title: 'Copied', description: node.path });
+        return;
+      }
+      if (action === 'cut' && node) {
+        if (isProtected(node)) return;
+        setClipboard({ node, mode: 'cut' });
+        toast({ title: 'Move queued', description: node.path });
+        return;
+      }
+      if (action === 'paste' && clipboard) {
+        const targetFolder = getPasteTarget(node);
+        const source = clipboard.node;
+        const targetName = clipboard.mode === 'copy' ? buildCopyName(source.name) : source.name;
+        const destination = path.join(targetFolder, targetName);
+
+        if (clipboard.mode === 'copy') {
+          await fileSystemService.copyFileOrFolder(source.path, destination);
+          toast({ title: 'Copied', description: `${source.path} -> ${destination}` });
+        } else {
+          await fileSystemService.moveFileOrFolder(source.path, destination);
+          setClipboard(null);
+          toast({ title: 'Moved', description: `${source.path} -> ${destination}` });
+        }
+        await refreshFileTree();
+      }
+    } catch (error) {
+      toast({
+        title: 'Operation failed',
+        description: error instanceof Error ? error.message : 'Unknown error',
+        variant: 'destructive',
+      });
+    }
+  };
+
   return (
-    <div className="flex flex-col h-full bg-[#252526] text-gray-300">
+    <div className="flex flex-col h-full bg-[#252526] text-gray-300" onContextMenu={(event) => openContextMenu(event, null)}>
       <div className="p-3 text-xs font-bold uppercase tracking-wider text-gray-500 flex justify-between items-center">
         <span>Explorer</span>
-        <RotateCcw className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => refreshFileTree()} />
+        <RotateCcw className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => void refreshFileTree()} />
       </div>
+
       <div className="flex-1 overflow-auto">
-        {files.map(node => (
-          <FileTreeNode key={node.id} node={node} level={0} onSelect={(n) => { setSelectedId(n.id); if(n.type === 'file') openFile(n); }} onToggle={toggleFolder} selectedId={selectedId} expandedNodes={expanded} />
+        {files.map((node) => (
+          <NodeRow
+            key={node.id}
+            node={node}
+            level={0}
+            selectedId={selectedId}
+            expandedNodes={expanded}
+            onSelect={(next) => {
+              setSelectedId(next.id);
+              if (next.type === 'file') void openFile(next);
+            }}
+            onToggle={toggleFolder}
+            onContextMenu={openContextMenu}
+          />
         ))}
       </div>
+
+      {menu && (
+        <div
+          className="fixed z-[90] min-w-[180px] rounded border border-ide-panel-border bg-background shadow-xl py-1"
+          style={{ left: menu.x, top: menu.y }}
+        >
+          {menuItems.map((item) => (
+            <button
+              key={item.key}
+              onClick={() => void handleAction(item.key)}
+              disabled={item.disabled}
+              className="w-full text-left px-3 py-1.5 text-sm hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {item.label}
+            </button>
+          ))}
+          {!menuItems.length && <div className="px-3 py-1.5 text-sm text-muted-foreground">No actions</div>}
+        </div>
+      )}
+
+      {selectedNode && clipboard && (
+        <div className="px-3 py-1 text-[11px] text-gray-400 border-t border-ide-panel-border">
+          Clipboard: {clipboard.mode.toUpperCase()} {clipboard.node.path}
+        </div>
+      )}
     </div>
   );
 };

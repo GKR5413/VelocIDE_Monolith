@@ -1,12 +1,10 @@
 import React from 'react';
 import { 
-  Save, 
   Search, 
   GitBranch, 
   Settings, 
   Sun, 
   Moon,
-  Code2,
   Command,
   ChevronDown,
   FolderOpen,
@@ -20,6 +18,9 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { useTheme } from '@/contexts/ThemeContext';
 import { useIDE } from '@/contexts/IDEContext';
 import { toast } from '@/hooks/use-toast';
+import FileManagerDialog from '@/components/FileManagerDialog';
+
+type FileManagerMode = 'open-file' | 'open-folder' | 'create-folder';
 
 export const TopBar: React.FC = () => {
   const { theme, toggleTheme } = useTheme();
@@ -28,12 +29,16 @@ export const TopBar: React.FC = () => {
   const { 
     activeTab, 
     saveAll, 
-    pickAndOpenFile, 
     saveActiveToDisk, 
     createFile,
+    createFolderAtPath,
+    openFile,
+    openFolder,
     triggerEditorAction,
     importRepository,
+    refreshFileTree,
   } = useIDE();
+  const [fileManagerMode, setFileManagerMode] = React.useState<FileManagerMode | null>(null);
 
   const handleImportRepo = async () => {
     const repoUrl = window.prompt('Repository URL (https://... or git@...)');
@@ -54,8 +59,15 @@ export const TopBar: React.FC = () => {
     }
   };
 
+  const dispatchTerminalAction = (action: 'new' | 'reconnect' | 'restart' | 'kill') => {
+    window.dispatchEvent(new CustomEvent('velocide:terminal:action', { detail: { action } }));
+  };
+
+  const closeFileManager = () => setFileManagerMode(null);
+
   return (
-    <header className="h-12 ide-panel border-b border-ide-panel-border flex items-center sticky top-0 z-50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+    <>
+      <header className="h-12 ide-panel border-b border-ide-panel-border flex items-center sticky top-0 z-50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       {/* Left Section - Logo & Menu */}
       <div className="flex items-center gap-4 px-4">
         <div className="flex items-center gap-3">
@@ -73,13 +85,15 @@ export const TopBar: React.FC = () => {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="min-w-64">
-              <DropdownMenuItem onClick={() => createFile()}>New File</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => createFile()}>New File</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setFileManagerMode('create-folder')}>New Folder</DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={pickAndOpenFile}>Open File…</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setFileManagerMode('open-file')}>Open File…</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setFileManagerMode('open-folder')}>Open Folder…</DropdownMenuItem>
               <DropdownMenuItem onSelect={handleImportRepo}>Import Repository…</DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={saveActiveToDisk} disabled={!activeTab}>Save</DropdownMenuItem>
-              <DropdownMenuItem onClick={saveAll}>Save All</DropdownMenuItem>
+              <DropdownMenuItem onSelect={saveActiveToDisk} disabled={!activeTab}>Save</DropdownMenuItem>
+              <DropdownMenuItem onSelect={saveAll}>Save All</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
 
@@ -90,24 +104,79 @@ export const TopBar: React.FC = () => {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="min-w-64">
-              <DropdownMenuItem onClick={() => triggerEditorAction('editor.action.undo')}>Undo</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => triggerEditorAction('editor.action.redo')}>Redo</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => triggerEditorAction('editor.action.undo')}>Undo</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => triggerEditorAction('editor.action.redo')}>Redo</DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => triggerEditorAction('editor.action.clipboardCutAction')}>Cut</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => triggerEditorAction('editor.action.clipboardCopyAction')}>Copy</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => triggerEditorAction('editor.action.clipboardPasteAction')}>Paste</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => triggerEditorAction('editor.action.clipboardCutAction')}>Cut</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => triggerEditorAction('editor.action.clipboardCopyAction')}>Copy</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => triggerEditorAction('editor.action.clipboardPasteAction')}>Paste</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           
-          <Button variant="ghost" size="sm" className="text-md-on-surface-variant hover:text-md-on-surface">
-            View
-          </Button>
-          <Button variant="ghost" size="sm" className="text-md-on-surface-variant hover:text-md-on-surface">
-            Terminal
-          </Button>
-          <Button variant="ghost" size="sm" className="text-md-on-surface-variant hover:text-md-on-surface">
-            Help
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" className="text-md-on-surface-variant hover:text-md-on-surface">
+                View
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="min-w-56">
+              <DropdownMenuLabel>View</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => refreshFileTree()}>Refresh Explorer</DropdownMenuItem>
+              <DropdownMenuItem onSelect={toggleTheme}>
+                Switch to {theme === 'light' ? 'Dark' : 'Light'} Theme
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => triggerEditorAction('actions.find')}>Find in File</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" className="text-md-on-surface-variant hover:text-md-on-surface">
+                Terminal
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="min-w-56">
+              <DropdownMenuLabel>Terminal</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => dispatchTerminalAction('new')}>New Tab</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => dispatchTerminalAction('reconnect')}>Reconnect Active Tab</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => dispatchTerminalAction('restart')}>Restart Active Tab</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => dispatchTerminalAction('kill')}>Kill Active Tab</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" className="text-md-on-surface-variant hover:text-md-on-surface">
+                Help
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="min-w-64">
+              <DropdownMenuLabel>Help</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={() =>
+                  toast({
+                    title: 'Keyboard Shortcuts',
+                    description: 'Ctrl/Cmd+S save, Ctrl+Shift+C copy terminal, Ctrl+Shift+V paste terminal.',
+                  })
+                }
+              >
+                Keyboard Shortcuts
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() =>
+                  toast({
+                    title: 'VelocIDE',
+                    description: 'Integrated editor, container terminal, and Gemini assistant in one workspace.',
+                  })
+                }
+              >
+                About VelocIDE
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </nav>
       </div>
 
@@ -136,11 +205,18 @@ export const TopBar: React.FC = () => {
           size="sm" 
           className="text-md-on-surface-variant hover:text-md-on-surface"
           title="Search everywhere (Ctrl+Shift+P)"
+          onClick={() => triggerEditorAction('actions.find')}
         >
           <Command size={16} />
         </Button>
         
-        <Button variant="ghost" size="sm" className="text-md-on-surface-variant hover:text-md-on-surface" onClick={pickAndOpenFile} title="Open File">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-md-on-surface-variant hover:text-md-on-surface"
+          onClick={() => setFileManagerMode('open-file')}
+          title="Open File"
+        >
           <FolderOpen size={16} />
         </Button>
         
@@ -198,7 +274,22 @@ export const TopBar: React.FC = () => {
           Logout
         </Button>
       </div>
-    </header>
+      </header>
+      <FileManagerDialog
+        isOpen={fileManagerMode !== null}
+        mode={fileManagerMode || 'open-file'}
+        onClose={closeFileManager}
+        onOpenFile={openFile}
+        onOpenFolder={async (folderPath) => {
+          await openFolder(folderPath);
+          toast({ title: 'Folder opened', description: folderPath });
+        }}
+        onCreateFolder={async (parentPath, folderName) => {
+          await createFolderAtPath(parentPath, folderName);
+          toast({ title: 'Folder created', description: `${parentPath}/${folderName}` });
+        }}
+      />
+    </>
   );
 };
 
