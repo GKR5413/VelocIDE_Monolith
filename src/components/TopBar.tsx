@@ -76,7 +76,7 @@ export const TopBar: React.FC = () => {
               <DropdownMenuItem onClick={() => createFile()}>New File</DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={pickAndOpenFile}>Open File…</DropdownMenuItem>
-              <DropdownMenuItem onClick={handleImportRepo}>Import Repository…</DropdownMenuItem>
+              <DropdownMenuItem onSelect={handleImportRepo}>Import Repository…</DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={saveActiveToDisk} disabled={!activeTab}>Save</DropdownMenuItem>
               <DropdownMenuItem onClick={saveAll}>Save All</DropdownMenuItem>
@@ -150,7 +150,13 @@ export const TopBar: React.FC = () => {
         
         <div className="w-px h-6 bg-ide-panel-border mx-1" />
         
-        <Button variant="ghost" size="sm" className="text-md-on-surface-variant hover:text-md-on-surface">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-md-on-surface-variant hover:text-md-on-surface"
+          onClick={handleImportRepo}
+          title="Import Repository"
+        >
           <GitBranch size={16} />
           <span className="ml-1 text-sm">main</span>
           <ChevronDown size={12} className="ml-1" />
