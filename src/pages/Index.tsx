@@ -1,10 +1,17 @@
-import React, { useRef } from 'react';
-import AIChat from '@/components/AIChat';
+import React, { Suspense } from 'react';
 import TopBar from '@/components/TopBar';
 import FileExplorer from '@/components/FileExplorer';
-import CodeEditor from '@/components/CodeEditor';
-import BottomContainerTerminal from '@/components/BottomContainerTerminal';
 import ResizablePanel from '@/components/ResizablePanel';
+
+const CodeEditor = React.lazy(() => import('@/components/CodeEditor'));
+const BottomContainerTerminal = React.lazy(() => import('@/components/BottomContainerTerminal'));
+const AIChat = React.lazy(() => import('@/components/AIChat'));
+
+const PanelFallback: React.FC<{ label: string }> = ({ label }) => (
+  <div className="h-full w-full flex items-center justify-center text-sm text-muted-foreground bg-md-surface">
+    Loading {label}...
+  </div>
+);
 
 export default function Index() {
 
@@ -27,7 +34,9 @@ export default function Index() {
 
         <div className="flex-1 flex flex-col min-h-0">
           <div className="flex-1 min-h-0">
-            <CodeEditor />
+            <Suspense fallback={<PanelFallback label="editor" />}>
+              <CodeEditor />
+            </Suspense>
           </div>
           <ResizablePanel
             direction="horizontal"
@@ -38,7 +47,9 @@ export default function Index() {
             persistKey="bottomTerminalHeight"
             className="border-t border-ide-panel-border"
           >
-            <BottomContainerTerminal />
+            <Suspense fallback={<PanelFallback label="terminal" />}>
+              <BottomContainerTerminal />
+            </Suspense>
           </ResizablePanel>
         </div>
 
@@ -50,7 +61,9 @@ export default function Index() {
           persistKey="aiChatPanelWidth"
           className="border-l border-ide-panel-border"
         >
-          <AIChat />
+          <Suspense fallback={<PanelFallback label="assistant" />}>
+            <AIChat />
+          </Suspense>
         </ResizablePanel>
       </div>
     </div>
