@@ -13,6 +13,61 @@ export const CodeEditor: React.FC = () => {
     editorRef.current = editor;
   };
 
+  const configureMonaco = (monaco: Monaco) => {
+    monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
+      noSemanticValidation: false,
+      noSyntaxValidation: false,
+      noSuggestionDiagnostics: false,
+    });
+    monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions({
+      noSemanticValidation: false,
+      noSyntaxValidation: false,
+      noSuggestionDiagnostics: false,
+    });
+
+    const compilerOptions = {
+      allowJs: true,
+      allowNonTsExtensions: true,
+      target: monaco.languages.typescript.ScriptTarget.ES2022,
+      module: monaco.languages.typescript.ModuleKind.ESNext,
+      moduleResolution: monaco.languages.typescript.ModuleResolutionKind.NodeJs,
+      jsx: monaco.languages.typescript.JsxEmit.ReactJSX,
+      resolveJsonModule: true,
+      esModuleInterop: true,
+      strict: false,
+      skipLibCheck: true,
+      noEmit: true,
+      lib: ['ES2022', 'DOM', 'DOM.Iterable'],
+      typeRoots: ['node_modules/@types'],
+    };
+
+    monaco.languages.typescript.typescriptDefaults.setCompilerOptions(compilerOptions);
+    monaco.languages.typescript.javascriptDefaults.setCompilerOptions(compilerOptions);
+    monaco.languages.typescript.typescriptDefaults.setEagerModelSync(true);
+    monaco.languages.typescript.javascriptDefaults.setEagerModelSync(true);
+
+    monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
+      validate: true,
+      allowComments: true,
+      enableSchemaRequest: true,
+      schemaValidation: 'warning',
+    });
+
+    monaco.languages.css.cssDefaults.setOptions({
+      validate: true,
+      lint: { unknownProperties: 'warning' },
+      data: { useDefaultDataProvider: true },
+    });
+
+    monaco.languages.html.htmlDefaults.setOptions({
+      format: { tabSize: 2, wrapLineLength: 120 },
+      suggest: {},
+      data: { useDefaultDataProvider: true },
+    });
+  };
+
+  const editorPath = activeTab ? `file:///workspace/${activeTab.path.replace(/^\.?\//, '')}` : undefined;
+
   if (!activeTab) {
     return (
       <div className="flex flex-col h-full">
@@ -62,15 +117,22 @@ export const CodeEditor: React.FC = () => {
         <Editor
           height="100%"
           language={activeTab.language}
+          path={editorPath}
           value={activeTab.content}
           onChange={(value) => updateActiveContent(value ?? '')}
           theme={theme === 'dark' ? 'vs-dark' : 'light'}
           onMount={handleEditorDidMount}
-          options={{ 
+          beforeMount={configureMonaco}
+          options={{
             minimap: { enabled: false },
             padding: { top: 0, bottom: 0 },
             scrollBeyondLastLine: false,
-            automaticLayout: true
+            automaticLayout: true,
+            quickSuggestions: { other: true, comments: false, strings: true },
+            suggestOnTriggerCharacters: true,
+            parameterHints: { enabled: true },
+            formatOnType: true,
+            formatOnPaste: true,
           }}
         />
       </div>
