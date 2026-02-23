@@ -125,13 +125,41 @@ const FileExplorer: React.FC = () => {
     return () => window.removeEventListener('click', closeMenu);
   }, []);
 
-  useEffect(() => {
-    files.forEach((node) => {
-      if (node.type === 'folder' && expanded.has(node.id) && (!node.children || node.children.length === 0)) {
-        void loadNodeChildren(node);
+  const findNodeById = useCallback((nodes: IDEFileNode[], nodeId: string): IDEFileNode | null => {
+    for (const node of nodes) {
+      if (node.id === nodeId) return node;
+      if (node.children?.length) {
+        const found = findNodeById(node.children, nodeId);
+        if (found) return found;
       }
-    });
-  }, [files, expanded, loadNodeChildren]);
+    }
+    return null;
+  }, []);
+
+  const syncExpandedFolders = useCallback(async () => {
+    const expandedIds = Array.from(expanded);
+    for (const folderId of expandedIds) {
+      const folderNode = findNodeById(files, folderId);
+      if (folderNode && folderNode.type === 'folder') {
+        await loadNodeChildren(folderNode);
+      }
+    }
+  }, [expanded, files, findNodeById, loadNodeChildren]);
+
+  useEffect(() => {
+    void syncExpandedFolders();
+    // We intentionally sync immediately when expand/collapse changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      if (document.hidden) return;
+      void refreshFileTree();
+      void syncExpandedFolders();
+    }, 1500);
+    return () => window.clearInterval(interval);
+  }, [refreshFileTree, syncExpandedFolders]);
 
   const toggleFolder = useCallback(
     async (node: IDEFileNode) => {

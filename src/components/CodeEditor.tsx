@@ -1,17 +1,106 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useIDE } from '@/contexts/IDEContext';
 import Editor, { Monaco } from '@monaco-editor/react';
 import type { editor as MonacoEditor } from 'monaco-editor';
 import { X } from 'lucide-react';
 
+const AUTO_SUGGEST_KEY = 'velocide_auto_suggest';
+const FORMAT_ON_SAVE_KEY = 'velocide_format_on_save';
+
 export const CodeEditor: React.FC = () => {
   const { theme } = useTheme();
-  const { activeTab, tabs, setActiveTab, closeTab, updateActiveContent, editorRef } = useIDE();
+  const { activeTab, tabs, setActiveTab, closeTab, updateActiveContent, editorRef, saveTab } = useIDE();
+  const autosaveTimerRef = useRef<number | null>(null);
+  const monacoRef = useRef<Monaco | null>(null);
+  const [autoSuggestEnabled, setAutoSuggestEnabled] = useState<boolean>(() => {
+    const stored = localStorage.getItem(AUTO_SUGGEST_KEY);
+    return stored === null ? true : stored === 'true';
+  });
+  const [formatOnSaveEnabled, setFormatOnSaveEnabled] = useState<boolean>(() => {
+    const stored = localStorage.getItem(FORMAT_ON_SAVE_KEY);
+    return stored === null ? true : stored === 'true';
+  });
 
-  const handleEditorDidMount = (editor: MonacoEditor.IStandaloneCodeEditor, _monaco: Monaco) => {
-    editorRef.current = editor;
+  const applyEditorPreferences = () => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.updateOptions({
+      quickSuggestions: autoSuggestEnabled ? { other: true, comments: false, strings: true } : false,
+      suggestOnTriggerCharacters: autoSuggestEnabled,
+      parameterHints: { enabled: autoSuggestEnabled },
+      inlineSuggest: { enabled: autoSuggestEnabled },
+      wordBasedSuggestions: autoSuggestEnabled ? 'currentDocument' : 'off',
+      tabCompletion: autoSuggestEnabled ? 'on' : 'off',
+      acceptSuggestionOnEnter: autoSuggestEnabled ? 'smart' : 'off',
+    });
   };
+
+  const formatDocument = async () => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const action = editor.getAction('editor.action.formatDocument');
+    if (!action) return;
+    try {
+      await action.run();
+    } catch (error) {
+      console.warn('Format action failed:', error);
+    }
+  };
+
+  const runAutosave = async () => {
+    if (!activeTab?.isDirty) return;
+    try {
+      if (formatOnSaveEnabled) {
+        await formatDocument();
+      }
+      await saveTab(activeTab.id);
+    } catch (error) {
+      console.error('Autosave failed:', error);
+    }
+  };
+
+  const handleEditorDidMount = (editor: MonacoEditor.IStandaloneCodeEditor, monaco: Monaco) => {
+    editorRef.current = editor;
+    monacoRef.current = monaco;
+    applyEditorPreferences();
+
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Space, () => {
+      editor.trigger('keyboard', 'editor.action.triggerSuggest', {});
+    });
+
+    editor.onDidBlurEditorText(() => {
+      void runAutosave();
+    });
+  };
+
+  useEffect(() => {
+    if (!activeTab?.isDirty) return;
+    if (autosaveTimerRef.current) {
+      window.clearTimeout(autosaveTimerRef.current);
+    }
+    autosaveTimerRef.current = window.setTimeout(() => {
+      void runAutosave();
+    }, 900);
+
+    return () => {
+      if (autosaveTimerRef.current) {
+        window.clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab?.id, activeTab?.content, activeTab?.isDirty]);
+
+  useEffect(() => {
+    localStorage.setItem(AUTO_SUGGEST_KEY, String(autoSuggestEnabled));
+    applyEditorPreferences();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSuggestEnabled]);
+
+  useEffect(() => {
+    localStorage.setItem(FORMAT_ON_SAVE_KEY, String(formatOnSaveEnabled));
+  }, [formatOnSaveEnabled]);
 
   const configureMonaco = (monaco: Monaco) => {
     monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
@@ -45,6 +134,15 @@ export const CodeEditor: React.FC = () => {
     monaco.languages.typescript.javascriptDefaults.setCompilerOptions(compilerOptions);
     monaco.languages.typescript.typescriptDefaults.setEagerModelSync(true);
     monaco.languages.typescript.javascriptDefaults.setEagerModelSync(true);
+    monaco.languages.typescript.typescriptDefaults.setInlayHintsOptions({
+      includeInlayParameterNameHints: 'literals',
+      includeInlayParameterNameHintsWhenArgumentMatchesName: false,
+      includeInlayFunctionParameterTypeHints: true,
+      includeInlayVariableTypeHints: true,
+      includeInlayPropertyDeclarationTypeHints: true,
+      includeInlayFunctionLikeReturnTypeHints: true,
+      includeInlayEnumMemberValueHints: true,
+    });
 
     monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
       validate: true,
@@ -110,6 +208,22 @@ export const CodeEditor: React.FC = () => {
             </button>
           </div>
         ))}
+        <div className="ml-auto flex items-center gap-2 px-2 py-1.5 text-xs">
+          <button
+            className={`px-2 py-1 rounded border ${autoSuggestEnabled ? 'border-emerald-500 text-emerald-500' : 'border-ide-panel-border text-gray-400'}`}
+            onClick={() => setAutoSuggestEnabled((prev) => !prev)}
+            title="Toggle Monaco auto suggest"
+          >
+            Auto Suggest {autoSuggestEnabled ? 'On' : 'Off'}
+          </button>
+          <button
+            className={`px-2 py-1 rounded border ${formatOnSaveEnabled ? 'border-emerald-500 text-emerald-500' : 'border-ide-panel-border text-gray-400'}`}
+            onClick={() => setFormatOnSaveEnabled((prev) => !prev)}
+            title="Toggle format on save"
+          >
+            Format on Save {formatOnSaveEnabled ? 'On' : 'Off'}
+          </button>
+        </div>
       </div>
 
       {/* Editor */}
@@ -128,11 +242,25 @@ export const CodeEditor: React.FC = () => {
             padding: { top: 0, bottom: 0 },
             scrollBeyondLastLine: false,
             automaticLayout: true,
-            quickSuggestions: { other: true, comments: false, strings: true },
-            suggestOnTriggerCharacters: true,
-            parameterHints: { enabled: true },
+            quickSuggestions: autoSuggestEnabled ? { other: true, comments: false, strings: true } : false,
+            quickSuggestionsDelay: 40,
+            suggestOnTriggerCharacters: autoSuggestEnabled,
+            parameterHints: { enabled: autoSuggestEnabled },
+            inlineSuggest: { enabled: autoSuggestEnabled },
+            suggest: {
+              preview: true,
+              showMethods: true,
+              showFunctions: true,
+              showConstructors: true,
+              showDeprecated: false,
+              snippetsPreventQuickSuggestions: false,
+            },
+            wordBasedSuggestions: autoSuggestEnabled ? 'currentDocument' : 'off',
+            acceptSuggestionOnEnter: autoSuggestEnabled ? 'smart' : 'off',
+            tabCompletion: autoSuggestEnabled ? 'on' : 'off',
             formatOnType: true,
             formatOnPaste: true,
+            formatOnSave: formatOnSaveEnabled,
           }}
         />
       </div>

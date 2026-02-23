@@ -65,6 +65,7 @@ const IDEContext = createContext<IDEState | undefined>(undefined);
 export const IDEProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [files, setFiles] = useState<IDEFileNode[]>([]);
   const [currentFolderPath, setCurrentFolderPath] = useState<string>('.');
+  const filesSignatureRef = useRef<string>('');
   const editorRef = useRef<EditorRefValue | null>(null);
   const [tabs, setTabs] = useState<IDETab[]>(() => {
     const saved = localStorage.getItem('ide-tabs');
@@ -100,34 +101,82 @@ export const IDEProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   }, []);
 
+  const findNodeById = useCallback((nodes: IDEFileNode[], nodeId: string): IDEFileNode | undefined => {
+    for (const node of nodes) {
+      if (node.id === nodeId) return node;
+      if (node.children?.length) {
+        const found = findNodeById(node.children, nodeId);
+        if (found) return found;
+      }
+    }
+    return undefined;
+  }, []);
+
+  const childrenSignature = useCallback((nodes: IDEFileNode[] = []) =>
+    nodes.map((node) => `${node.type}:${node.path}:${node.name}`).join('|')
+  , []);
+
   const loadNodeChildren = useCallback(async (node: IDEFileNode): Promise<IDEFileNode[]> => {
     if (node.type !== 'folder') return [];
     try {
       const response = await fileSystemService.getDirectoryContents(node.path);
       const children = response.files.map(item => fileSystemService.convertToFileNode(item, new Set()));
-      setFiles((prev) => updateNodeChildren(prev, node.id, children));
+      setFiles((prev) => {
+        const existing = findNodeById(prev, node.id);
+        const existingSig = childrenSignature(existing?.children || []);
+        const nextSig = childrenSignature(children);
+        if (existingSig === nextSig) return prev;
+        return updateNodeChildren(prev, node.id, children);
+      });
       return children;
     } catch (error) {
       console.error(`Failed to load children for ${node.path}:`, error);
       return [];
     }
-  }, [updateNodeChildren]);
+  }, [childrenSignature, findNodeById, updateNodeChildren]);
+
+  const buildSignature = useCallback((nodes: IDEFileNode[]) =>
+    nodes.map((node) => `${node.type}:${node.path}:${node.name}`).join('|')
+  , []);
 
   const refreshFileTree = useCallback(async () => {
-    console.log('refreshFileTree called');
     try {
       const rootNodes = await fileSystemService.getDirectoryContents(currentFolderPath);
-      console.log('Root nodes received:', rootNodes);
       const convertedNodes = rootNodes.files.map(item => fileSystemService.convertToFileNode(item, new Set()));
-      console.log('Converted nodes:', convertedNodes);
-      setFiles(convertedNodes);
+      const nextSignature = buildSignature(convertedNodes);
+      if (nextSignature !== filesSignatureRef.current) {
+        filesSignatureRef.current = nextSignature;
+        setFiles(convertedNodes);
+      }
     } catch (error) {
       console.error('Error in refreshFileTree:', error);
     }
-  }, [currentFolderPath]);
+  }, [buildSignature, currentFolderPath]);
 
   useEffect(() => {
     refreshFileTree();
+  }, [refreshFileTree]);
+
+  useEffect(() => {
+    const refreshOnVisibility = () => {
+      if (!document.hidden) {
+        void refreshFileTree();
+      }
+    };
+    const interval = window.setInterval(() => {
+      if (!document.hidden) {
+        void refreshFileTree();
+      }
+    }, 2000);
+
+    document.addEventListener('visibilitychange', refreshOnVisibility);
+    window.addEventListener('focus', refreshOnVisibility);
+
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', refreshOnVisibility);
+      window.removeEventListener('focus', refreshOnVisibility);
+    };
   }, [refreshFileTree]);
 
   const openFile = useCallback(async (file: IDEFileNode) => {
@@ -329,8 +378,9 @@ export const IDEProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const response = await fileSystemService.getDirectoryContents(nextPath);
     const convertedNodes = response.files.map(item => fileSystemService.convertToFileNode(item, new Set()));
     setCurrentFolderPath(nextPath);
+    filesSignatureRef.current = buildSignature(convertedNodes);
     setFiles(convertedNodes);
-  }, []);
+  }, [buildSignature]);
 
   const renameNode = useCallback(async (node: IDEFileNode, newName: string) => {
     try {

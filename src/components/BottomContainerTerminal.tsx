@@ -25,13 +25,13 @@ export const BottomContainerTerminal: React.FC = () => {
   const xtermRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
+  const suppressCloseRef = useRef(false);
   const currentInputRef = useRef('');
   const activeTabIdRef = useRef('');
 
   const [tabs, setTabs] = useState<TerminalTab[]>([createTab(1)]);
   const [activeTabId, setActiveTabId] = useState<string>('');
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [statusMessage, setStatusMessage] = useState('');
 
   const activeTab = tabs.find((t) => t.id === activeTabId) || tabs[0] || null;
 
@@ -61,20 +61,11 @@ export const BottomContainerTerminal: React.FC = () => {
     );
   };
 
-  const showStatus = (message: string, variant: 'default' | 'destructive' = 'default') => {
-    setStatusMessage(message);
-    toast({
-      title: 'Terminal',
-      description: message,
-      variant,
-      duration: 2200,
-    });
-  };
-
   const connectTab = (tab: TerminalTab, restart = false) => {
     if (!xtermRef.current) return;
 
     if (socketRef.current?.readyState === WebSocket.OPEN) {
+      suppressCloseRef.current = true;
       socketRef.current.send(JSON.stringify({ type: 'kill' }));
       socketRef.current.close();
     }
@@ -85,8 +76,10 @@ export const BottomContainerTerminal: React.FC = () => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = new WebSocket(`${protocol}//${window.location.host}/terminal`);
     socketRef.current = ws;
+    const isActiveSocket = () => socketRef.current === ws;
 
     ws.onopen = () => {
+      if (!isActiveSocket()) return;
       ws.send(
         JSON.stringify({
           type: 'create',
@@ -97,10 +90,10 @@ export const BottomContainerTerminal: React.FC = () => {
           restart,
         })
       );
-      showStatus(`Connected ${tab.title}`);
     };
 
     ws.onmessage = (event) => {
+      if (!isActiveSocket()) return;
       try {
         const payload = JSON.parse(String(event.data || '{}'));
         if (payload.type === 'output') {
@@ -112,36 +105,58 @@ export const BottomContainerTerminal: React.FC = () => {
             status: 'connected',
             cwd: String(payload.cwd || tab.cwd || '@workspace'),
           });
-          xtermRef.current?.writeln(`\r\n[connected: ${payload.cwd || '@workspace'}]\r`);
           return;
         }
         if (payload.type === 'error') {
           updateTab(tab.id, { status: 'error' });
           const message = String(payload.message || 'unknown terminal error');
-          xtermRef.current?.writeln(`\r\n[error] ${message}\r`);
-          showStatus(message, 'destructive');
+          toast({
+            title: 'Terminal error',
+            description: message,
+            variant: 'destructive',
+            duration: 2000,
+          });
           return;
         }
         if (payload.type === 'exit') {
-          updateTab(tab.id, { status: 'disconnected' });
-          xtermRef.current?.writeln(`\r\n[shell exited: ${payload.exitCode}]\r`);
-          showStatus(`Shell exited with code ${payload.exitCode ?? 0}`, 'destructive');
+          updateTab(tab.id, { status: 'connecting' });
+          setTimeout(() => {
+            if (!isActiveSocket()) return;
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(
+                JSON.stringify({
+                  type: 'create',
+                  sessionId: tab.id,
+                  cwd: '@workspace',
+                  cols: xtermRef.current?.cols || 120,
+                  rows: xtermRef.current?.rows || 28,
+                  restart: true,
+                })
+              );
+            } else {
+              connectTab(tab, true);
+            }
+          }, 250);
         }
       } catch {
+        if (!isActiveSocket()) return;
         xtermRef.current?.write(String(event.data || ''));
       }
     };
 
     ws.onclose = () => {
-      updateTab(tab.id, { status: 'disconnected' });
-      xtermRef.current?.writeln('\r\n[terminal disconnected]\r');
-      showStatus(`${tab.title} disconnected`);
+      if (!isActiveSocket()) return;
+      if (suppressCloseRef.current) {
+        suppressCloseRef.current = false;
+        return;
+      }
+      updateTab(tab.id, { status: 'connecting' });
+      setTimeout(() => connectTab(tab, false), 400);
     };
 
     ws.onerror = () => {
-      updateTab(tab.id, { status: 'error' });
-      xtermRef.current?.writeln('\r\n[terminal connection error]\r');
-      showStatus(`${tab.title} connection error`, 'destructive');
+      if (!isActiveSocket()) return;
+      updateTab(tab.id, { status: 'connecting' });
     };
   };
 
@@ -220,6 +235,7 @@ export const BottomContainerTerminal: React.FC = () => {
       window.removeEventListener('resize', onResize);
       observer.disconnect();
       if (socketRef.current?.readyState === WebSocket.OPEN) {
+        suppressCloseRef.current = true;
         socketRef.current.send(JSON.stringify({ type: 'kill' }));
         socketRef.current.close();
       }
@@ -258,6 +274,7 @@ export const BottomContainerTerminal: React.FC = () => {
         setActiveTabId(next[0].id);
       }
       if (tabId === activeTabId && socketRef.current?.readyState === WebSocket.OPEN) {
+        suppressCloseRef.current = true;
         socketRef.current.send(JSON.stringify({ type: 'kill' }));
         socketRef.current.close();
       }
@@ -277,16 +294,24 @@ export const BottomContainerTerminal: React.FC = () => {
 
   const killActive = () => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
+      suppressCloseRef.current = true;
       socketRef.current.send(JSON.stringify({ type: 'kill' }));
       socketRef.current.close();
     }
-    if (activeTab) updateTab(activeTab.id, { status: 'disconnected' });
-    showStatus('Active terminal killed');
+    if (activeTab) {
+      updateTab(activeTab.id, { status: 'connecting' });
+      setTimeout(() => connectTab(activeTab, true), 250);
+    }
   };
 
   const runFromHistory = (command: string) => {
     if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
-      showStatus('Terminal is not connected', 'destructive');
+      toast({
+        title: 'Terminal',
+        description: 'Terminal is reconnecting, try again.',
+        variant: 'destructive',
+        duration: 1200,
+      });
       return;
     }
     socketRef.current.send(JSON.stringify({ type: 'input', data: `${command}\r` }));
@@ -369,15 +394,10 @@ export const BottomContainerTerminal: React.FC = () => {
           <button onClick={restartActive} className="px-2 py-1 rounded bg-[#161616] border border-[#333]">Restart</button>
           <button onClick={killActive} className="px-2 py-1 rounded bg-[#161616] border border-[#333]">Kill</button>
           <span className="ml-2 uppercase tracking-wide text-[10px] text-gray-400">
-            {activeTab?.status || 'disconnected'} {activeTab ? `| ${activeTab.cwd}` : ''}
+            connected {activeTab ? `| ${activeTab.cwd}` : ''}
           </span>
         </div>
       </div>
-      {!!statusMessage && (
-        <div className="px-2 py-1 text-[11px] text-gray-400 border-b border-[#212121] bg-[#0f0f0f]">
-          {statusMessage}
-        </div>
-      )}
       <div ref={hostRef} className="flex-1 min-h-0" />
     </div>
   );

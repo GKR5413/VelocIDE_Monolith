@@ -43,10 +43,7 @@ export default defineConfig({
   },
   build: {
     rollupOptions: {
-      external: ['simple-git', 'child_process', 'fs', 'node:buffer', 'node:events'],
+      external: ['child_process', 'fs', 'node:buffer', 'node:events'],
     }
   },
-  optimizeDeps: {
-    exclude: ['simple-git']
-  }
 })

@@ -15,7 +15,7 @@ import {
 
 const app = express();
 
-const PORT = Number(process.env.PORT || 8080);
+const PORT = Number(process.env.PORT || 8081);
 const WORKSPACE_ROOT = path.resolve(process.env.WORKSPACE_ROOT || path.join(process.cwd(), 'workspace'));
 const CONTAINER_HOME = path.resolve(process.env.CONTAINER_HOME || '/root');
 const MAX_OUTPUT_BYTES = Number(process.env.MAX_OUTPUT_BYTES || 200_000);
@@ -1108,20 +1108,8 @@ terminalWss.on('connection', (ws) => {
   });
 });
 
-const staticRoot = path.resolve(process.cwd(), 'dist');
-app.use(express.static(staticRoot));
-app.get(/.*/, async (_req, res) => {
-  const indexPath = path.join(staticRoot, 'index.html');
-  try {
-    await fs.access(indexPath);
-    res.sendFile(indexPath);
-  } catch {
-    res.status(503).send('Frontend build not found. Run `npm run build` first.');
-  }
-});
-
 await ensureWorkspace();
 httpServer.listen(PORT, () => {
-  console.log(`VelocIDE monolith listening on port ${PORT}`);
+  console.log(`VelocIDE API listening on port ${PORT}`);
   console.log(`Workspace root: ${WORKSPACE_ROOT}`);
 });

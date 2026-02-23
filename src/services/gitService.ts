@@ -1,4 +1,13 @@
-import simpleGit, { SimpleGit, SimpleGitOptions } from 'simple-git';
+import simpleGit from '@/lib/simple-git-stub';
+
+type SimpleGitOptions = {
+  baseDir: string;
+  binary: string;
+  maxConcurrentProcesses: number;
+  trimmed: boolean;
+};
+
+type SimpleGit = ReturnType<typeof simpleGit>;
 
 export interface GitStatus {
   current: string;
