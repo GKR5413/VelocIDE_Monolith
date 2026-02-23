@@ -10,6 +10,14 @@ interface TerminalOutput {
   isRunning: boolean;
 }
 
+interface AgentToolResult {
+  id?: string;
+  tool: string;
+  ok: boolean;
+  args?: Record<string, unknown>;
+  error?: string | null;
+}
+
 interface ChatMessage {
   id: string;
   type: 'user' | 'ai';
@@ -17,6 +25,7 @@ interface ChatMessage {
   timestamp: Date;
   model?: string;
   terminalOutputs?: TerminalOutput[];
+  toolResults?: AgentToolResult[];
 }
 
 interface AgentHistoryMessage {
@@ -50,6 +59,16 @@ export const AIChat: React.FC = () => {
         content += `\nOutput:\n${term.output || ''}`;
         if (term.exitCode !== undefined) {
           content += `\nExit Code: ${term.exitCode}`;
+        }
+      });
+    }
+    if (message.toolResults && message.toolResults.length > 0) {
+      content += '\n\n[Tool Results]:';
+      message.toolResults.forEach((tool, idx) => {
+        content += `\nTool #${idx + 1}: ${tool.tool}`;
+        content += `\nStatus: ${tool.ok ? 'ok' : 'failed'}`;
+        if (tool.error) {
+          content += `\nError: ${tool.error}`;
         }
       });
     }
@@ -101,6 +120,7 @@ export const AIChat: React.FC = () => {
         timestamp: new Date(),
         model: currentModel.label,
         terminalOutputs: Array.isArray(data?.terminalOutputs) ? data.terminalOutputs : [],
+        toolResults: Array.isArray(data?.toolResults) ? data.toolResults : [],
       };
 
       setMessages((prev) => [...prev, aiMessage]);
@@ -182,6 +202,24 @@ export const AIChat: React.FC = () => {
                           Exit code: {terminal.exitCode}
                         </div>
                       )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {message.toolResults && message.toolResults.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {message.toolResults.map((tool, idx) => (
+                    <div
+                      key={`${tool.id || tool.tool}-${idx}`}
+                      className={`text-xs rounded px-2 py-1 border ${
+                        tool.ok
+                          ? 'bg-emerald-50 border-emerald-300 text-emerald-800 dark:bg-emerald-950/40 dark:border-emerald-700 dark:text-emerald-200'
+                          : 'bg-red-50 border-red-300 text-red-800 dark:bg-red-950/40 dark:border-red-700 dark:text-red-200'
+                      }`}
+                    >
+                      <span className="font-semibold">{tool.ok ? 'OK' : 'FAIL'}</span> {tool.tool}
+                      {tool.error ? ` - ${tool.error}` : ''}
                     </div>
                   ))}
                 </div>

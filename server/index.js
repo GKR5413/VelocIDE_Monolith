@@ -434,9 +434,16 @@ Rules:
 2) For sandbox/system requests, be concise and command-first.
 3) Always use this order for install/setup: CHECK, INSTALL, VERIFY.
 4) Runtime is Alpine container: use apk, workspace-safe paths. sudo is allowed when elevated package/system commands need it.
-5) Output executable commands only inside fenced shell blocks.
-6) Do not output placeholders or fake terminal logs.
-7) If previous command failed, correct the plan using the exact failure.
+5) Prefer structured tool mode. Respond as strict JSON:
+{
+  "assistant_response": "short user-facing message",
+  "tool_calls": [
+    { "id": "step-1", "tool": "run_command", "args": { "command": "command text", "cwd": "." } }
+  ]
+}
+6) Available tools: run_command, read_file, write_file, list_files.
+7) If previous command/tool failed, correct the plan using the exact failure.
+8) Do not output placeholders or fake terminal logs.
 `.trim();
 
   const response = await geminiClient.models.generateContent({
@@ -462,6 +469,108 @@ const formatExecutionFeedback = (steps) =>
     })
     .join('\n\n');
 
+const extractJsonPayload = (text = '') => {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    // continue
+  }
+
+  const fenced = raw.match(/```json\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) {
+    try {
+      return JSON.parse(fenced[1].trim());
+    } catch {
+      // continue
+    }
+  }
+
+  const firstBrace = raw.indexOf('{');
+  const lastBrace = raw.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    const maybeObject = raw.slice(firstBrace, lastBrace + 1);
+    try {
+      return JSON.parse(maybeObject);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+};
+
+const normalizeToolCalls = (payload) => {
+  const calls = Array.isArray(payload?.tool_calls) ? payload.tool_calls : [];
+  return calls
+    .map((call, index) => ({
+      id: String(call?.id || `tool-${index + 1}`),
+      tool: String(call?.tool || '').trim(),
+      args: call?.args && typeof call.args === 'object' ? call.args : {},
+    }))
+    .filter((call) => call.tool);
+};
+
+const parseAgentPlan = (text = '') => {
+  const payload = extractJsonPayload(text);
+  if (!payload || typeof payload !== 'object') return null;
+  return {
+    assistantResponse: String(payload.assistant_response || '').trim(),
+    toolCalls: normalizeToolCalls(payload),
+  };
+};
+
+const executeToolCall = async ({ tool, args = {}, sessionId }) => {
+  switch (tool) {
+    case 'run_command': {
+      const result = await executeCommandBatch({
+        command: String(args.command || ''),
+        cwd: String(args.cwd || '.'),
+        sessionId,
+      });
+      return {
+        ok: result.exitCode === 0,
+        tool,
+        args,
+        result,
+        terminalOutputs: result.steps.map((step) => ({
+          command: step.command,
+          output: step.output,
+          exitCode: step.exitCode,
+          isRunning: false,
+        })),
+      };
+    }
+    case 'read_file': {
+      const result = await readFileContent(String(args.path || ''));
+      return { ok: true, tool, args, result };
+    }
+    case 'write_file': {
+      const result = await writeFileContent(String(args.path || ''), String(args.content ?? ''));
+      return { ok: true, tool, args, result };
+    }
+    case 'list_files': {
+      const result = await listDirectory(String(args.path || '.'));
+      return { ok: true, tool, args, result };
+    }
+    default:
+      throw new Error(`Unsupported tool: ${tool}`);
+  }
+};
+
+const serializeToolResultForModel = (toolResult) => {
+  const base = {
+    tool: toolResult.tool,
+    args: toolResult.args,
+    ok: toolResult.ok,
+  };
+  if (toolResult.error) {
+    return { ...base, error: toolResult.error };
+  }
+  return { ...base, result: toolResult.result };
+};
+
 const toCommandOnlyResponse = (text = '') => {
   const blocks = extractShellBlocks(text);
   if (!blocks.length) return text;
@@ -472,13 +581,90 @@ const runAgentLoop = async ({ model, messages, sessionId }) => {
   const history = [...messages];
   let latestText = '';
   let latestSteps = [];
+  let latestToolResults = [];
 
   for (let attempt = 1; attempt <= MAX_AGENT_REPLANS + 1; attempt += 1) {
     latestText = await callGemini({ model, messages: history });
+    const parsedPlan = parseAgentPlan(latestText);
+
+    if (parsedPlan) {
+      if (!parsedPlan.toolCalls.length) {
+        return {
+          content: parsedPlan.assistantResponse || 'Done.',
+          terminalOutputs: latestSteps.map((step) => ({
+            command: step.command,
+            output: step.output,
+            exitCode: step.exitCode,
+            isRunning: false,
+          })),
+          toolResults: latestToolResults,
+          attempts: attempt,
+          status: 'success',
+        };
+      }
+
+      const attemptToolResults = [];
+      const attemptSteps = [];
+      let failed = false;
+
+      for (const toolCall of parsedPlan.toolCalls) {
+        try {
+          const outcome = await executeToolCall({
+            tool: toolCall.tool,
+            args: toolCall.args,
+            sessionId,
+          });
+          attemptToolResults.push({
+            id: toolCall.id,
+            tool: toolCall.tool,
+            args: toolCall.args,
+            ok: outcome.ok,
+            error: null,
+            result: outcome.result,
+          });
+          if (Array.isArray(outcome.terminalOutputs)) {
+            attemptSteps.push(...outcome.terminalOutputs.map((step) => ({
+              command: step.command,
+              output: step.output,
+              exitCode: step.exitCode ?? 1,
+            })));
+          }
+          if (!outcome.ok) {
+            failed = true;
+            break;
+          }
+        } catch (error) {
+          failed = true;
+          attemptToolResults.push({
+            id: toolCall.id,
+            tool: toolCall.tool,
+            args: toolCall.args,
+            ok: false,
+            error: error instanceof Error ? error.message : 'Tool execution failed',
+            result: null,
+          });
+          break;
+        }
+      }
+
+      latestToolResults = [...latestToolResults, ...attemptToolResults];
+      latestSteps = [...latestSteps, ...attemptSteps];
+      const compactResults = attemptToolResults.map(serializeToolResultForModel);
+
+      history.push({ role: 'assistant', content: latestText });
+      history.push({
+        role: 'user',
+        content: failed
+          ? `Tool execution failed. Re-plan with corrected tool_calls only.\n\n${JSON.stringify(compactResults, null, 2)}`
+          : `Tool execution succeeded. Continue only if needed. If task is complete, return JSON with empty tool_calls and final assistant_response.\n\n${JSON.stringify(compactResults, null, 2)}`,
+      });
+      continue;
+    }
+
     const blocks = extractShellBlocks(latestText);
 
     if (!blocks.length) {
-      return { content: latestText, terminalOutputs: [], attempts: attempt, status: 'no_commands' };
+      return { content: latestText, terminalOutputs: [], toolResults: latestToolResults, attempts: attempt, status: 'no_commands' };
     }
 
     const attemptSteps = [];
@@ -509,6 +695,7 @@ const runAgentLoop = async ({ model, messages, sessionId }) => {
           exitCode: step.exitCode,
           isRunning: false,
         })),
+        toolResults: latestToolResults,
         attempts: attempt,
         status: 'success',
       };
@@ -542,6 +729,7 @@ const runAgentLoop = async ({ model, messages, sessionId }) => {
       exitCode: step.exitCode,
       isRunning: false,
     })),
+    toolResults: latestToolResults,
     attempts: MAX_AGENT_REPLANS + 1,
     status: 'failed',
   };
